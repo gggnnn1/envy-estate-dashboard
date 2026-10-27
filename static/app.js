@@ -3,6 +3,12 @@
 (() => {
 const area=Number(document.body.dataset.area),$=id=>document.getElementById(id);
 const regionCode=new URLSearchParams(location.search).get('region');
+const lane=document.body.dataset.lane||'capital',local=lane==='local_major',prefix=local?'local-':'';
+for(const a of document.querySelectorAll('[data-lane-tab]'))a.setAttribute('aria-selected',String(a.dataset.laneTab===lane));
+if(local){
+ document.querySelector('.brand').href=`../local-${area}/`;
+ for(const a of document.querySelectorAll('[data-tab]'))a.href=`../local-${a.dataset.tab}/`;
+}
 let snapshot=null,busy=false;
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
 const fmt=v=>v===null?'—':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:4});
@@ -14,11 +20,19 @@ const ym=s=>`${s.slice(0,4)}.${s.slice(4,6)}`;
 const obsDate=s=>new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit'}).format(new Date(s)).replace(/\s+/g,'').replace(/\.$/,'');
 for(const a of document.querySelectorAll('[data-tab]')){
  if(Number(a.dataset.tab)===area)a.setAttribute('aria-current','page');
- if(regionCode&&/^\d{5}$/.test(regionCode))a.href=`../${a.dataset.tab}/?region=${regionCode}`;
+ if(regionCode&&/^\d{5}$/.test(regionCode))a.href=`../${prefix}${a.dataset.tab}/?region=${regionCode}`;
 }
 $('back-to-regions').hidden=!regionCode;
 function validate(data){
- if(data.schema_version!==2||data.area!==area||!Array.isArray(data.rows)||!data.rows.length||data.scope.regions!==69||new Set(data.rows.map(r=>r.region)).size!==69)throw Error('자료 형식·평형·지역 범위 확인 실패');
+ if(data.schema_version!==2||data.area!==area||!Array.isArray(data.rows)||!data.rows.length)throw Error('자료 형식·평형 확인 실패');
+ if(local){
+  const universe=data.scope.region_universe;
+  if(data.lane!==lane||data.scope.regions!==79||!Array.isArray(universe)||universe.length!==79||new Set(universe.map(r=>r.region_code)).size!==79||!Array.isArray(data.coverage)||data.coverage.length!==79)throw Error('지방 지역 범위 확인 실패');
+  const mapping=new Map(universe.map(r=>[r.region_code,r.region]));
+  if(new Set(data.coverage.map(r=>r.region_code)).size!==79||data.coverage.some(r=>mapping.get(r.region_code)!==r.region)||data.rows.some(r=>mapping.get(r.region_code)!==r.region||r.rent_source==='ACTUAL'))throw Error('지방 canonical 범위·전세 원천 불일치');
+  const sales=new Set(data.rows.filter(r=>r.sale.current!==null).map(r=>r.region_code));
+  if(data.coverage.some(r=>(r.status==='AVAILABLE')!==sales.has(r.region_code)||!['AVAILABLE','NO_VALID_SALE'].includes(r.status)))throw Error('지방 coverage 불일치');
+ }else if(data.lane&&data.lane!=='capital'||data.scope.regions!==69||new Set(data.rows.map(r=>r.region)).size!==69)throw Error('수도권 지역 범위 확인 실패');
  if(data.view!==(regionCode?'regions':'leaders'))throw Error('목록 종류 확인 실패');
  if(data.counts.rows!==data.rows.length||data.counts.with_metrics!==data.rows.filter(r=>r.gap_eok!==null).length||data.counts.without_metrics!==data.rows.filter(r=>r.gap_eok===null).length)throw Error('자료 집계 확인 실패');
  const keys=new Set();
@@ -113,7 +127,17 @@ function renderRows(){
  document.body.dataset.ready='true';document.body.dataset.visible=String(rows.length);
 }
 function apply(data){
- snapshot=data;const first=data.rows[0];
+ snapshot=data;const first=data.rows[0]||{name:'이 평형 수집 단지 없음',region:data.selected_region,sale:{current:null}};
+ if(local){
+  const select=$('region'),previous=select.value;select.replaceChildren(new Option('전체 지역','all'));
+  for(const name of [...new Set(data.scope.region_universe.map(r=>r.region.split(' ')[0]))].sort())select.add(new Option(name,name));
+  select.value=[...select.options].some(o=>o.value===previous)?previous:'all';
+  const missing=data.coverage.filter(r=>r.status!=='AVAILABLE');
+  $('coverage-notice').replaceChildren(document.createTextNode(`수집 79지역 · 유효 매매 ${79-missing.length}지역 · 미선정 ${missing.length}지역: `));
+  for(const r of missing){const a=el('a','region-link',r.region+' (유효 매매호가 없음)');a.href=`?region=${r.region_code}`;$('coverage-notice').append(a,document.createTextNode(' · '));}
+  $('coverage-notice').hidden=false;
+  $('history-notice').textContent=['two_weeks','four_weeks'].filter(k=>data.history[k].status!=='COMMITTED_VERIFIED').map(k=>`${dotDate(data.dates[k])}: ${data.history[k].reason}`).join(' / ');$('history-notice').hidden=!$('history-notice').textContent;
+ }
  $('top-price').textContent=fmt(first.sale.current);$('top-name').textContent=first.name;$('top-region').textContent=first.region;
  if(regionCode){
   $('title').textContent=`${first.region} ${area}㎡`;document.querySelector('.intro').textContent='수집 아파트 전체 · 매매가격 높은 순 · 호가 없는 단지도 마지막에 표시';
@@ -121,12 +145,12 @@ function apply(data){
   document.querySelector('.price-note').textContent='이 지역 수집 단지 중 가장 높은 최저 매매호가';
   document.title=`엔비 · ${first.region} ${area}㎡ 전체 가격순`;
  }
- $('region-count').replaceChildren(document.createTextNode(regionCode?'1':'69'),el('small','','곳'));
+ $('region-count').replaceChildren(document.createTextNode(regionCode?'1':String(data.scope.regions)),el('small','','곳'));
  for(const [id,value] of [['row-count',data.counts.rows],['metric-count',data.counts.with_metrics],['missing-count',data.counts.without_metrics]])$(id).replaceChildren(document.createTextNode(String(value)),el('small','','단지'));
  $('round-label').textContent=`확정 회차 ${dotDate(data.round)} · 비교 ${dotDate(data.dates.two_weeks)} / ${dotDate(data.dates.four_weeks)}`;
  $('observed-label').textContent=`현재 호가 실제 관측 ${obsDate(data.observed_from)}–${obsDate(data.observed_to)} KST · 단위 억 원`;
  const replaced=data.rows.filter(r=>r.rent_source==='ACTUAL').length;
- $('rent-summary').textContent=`전세호가 우선 · 실거래 강건가 대체 ${replaced}단지 · 사용 가능 기간 ${ym(data.rent_policy.window_from)}–${ym(data.rent_policy.window_to)} · 실거래 원천 ${ym(data.rent_policy.source_through)}까지`;
+ $('rent-summary').textContent=local?'지방 전세호가만 적용 · 실거래 품질검증 연결 전 대체하지 않음 · 근거 없으면 공란':`전세호가 우선 · 실거래 강건가 대체 ${replaced}단지 · 사용 가능 기간 ${ym(data.rent_policy.window_from)}–${ym(data.rent_policy.window_to)} · 실거래 원천 ${ym(data.rent_policy.source_through)}까지`;
  const policy=data.collection_policy,notices=[];
  if(policy){
   const exclusions=policy.excluded.filter(r=>!regionCode||r.region_code===regionCode);
@@ -145,12 +169,12 @@ async function load(){
  if(busy)return;busy=true;$('refresh').disabled=true;
  try{
   if(regionCode&&!/^\d{5}$/.test(regionCode))throw Error('유효하지 않은 지역 코드');
-  const file=regionCode?`${area}-regions.json`:`${area}.json`;
+  const file=regionCode?`${prefix}${area}-regions.json`:`${prefix}${area}.json`;
   const response=await fetch(`../data/${file}?v=${Math.floor(Date.now()/300000)}`,{cache:'no-store',signal:AbortSignal.timeout(30000)});
   if(!response.ok)throw Error('HTTP '+response.status);let data=await response.json();validate(data);
   if(regionCode){
-   const rows=data.rows.filter(r=>r.region_code===regionCode);if(!rows.length)throw Error('수집 범위에 없는 지역');
-   data={...data,rows,counts:{rows:rows.length,with_metrics:rows.filter(r=>r.gap_eok!==null).length,without_metrics:rows.filter(r=>r.gap_eok===null).length}};
+   const rows=data.rows.filter(r=>r.region_code===regionCode);const selected=data.scope.region_universe?.find(r=>r.region_code===regionCode);if(!rows.length&&!selected)throw Error('수집 범위에 없는 지역');
+   data={...data,selected_region:selected?.region,rows,counts:{rows:rows.length,with_metrics:rows.filter(r=>r.gap_eok!==null).length,without_metrics:rows.filter(r=>r.gap_eok===null).length}};
   }
   apply(data);
  }catch(error){
@@ -164,7 +188,7 @@ $('download-csv').addEventListener('click',event=>{
  const header=['지역','단지','평형','순위','매매현재','매매2주','매매4주','적용전세','전세2주','전세4주','갭','전세가율','전세출처','실거래기준월','실거래관측월','실거래건수','지표기준'];
  const lines=[header,...snapshot.rows.map(r=>[r.region,r.name,area,r.order,r.sale.current,r.sale.two_weeks,r.sale.four_weeks,r.applied_rent,r.rent.two_weeks,r.rent.four_weeks,r.gap_eok,r.rent_ratio_percent,r.rent_source,r.rent_reference?.latest_month,r.rent_reference?.months.join(' / '),r.rent_reference?.count,r.metrics_basis])];
  const csv=lines.map(row=>row.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
- const url=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'})),a=el('a');a.href=url;a.download=`${snapshot.rows[0].region}_${area}_${snapshot.round}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ const url=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'})),a=el('a');a.href=url;a.download=`${(snapshot.rows[0]?.region||snapshot.selected_region)}_${area}_${snapshot.round}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
 $('search').addEventListener('input',renderRows);$('region').addEventListener('change',renderRows);$('sort').addEventListener('change',renderRows);$('refresh').addEventListener('click',load);
 load();setInterval(()=>{if(!document.hidden)load();},300000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});

@@ -29,7 +29,7 @@ function validate(data){
   const universe=data.scope.region_universe;
   if(data.lane!==lane||data.scope.regions!==79||!Array.isArray(universe)||universe.length!==79||new Set(universe.map(r=>r.region_code)).size!==79||!Array.isArray(data.coverage)||data.coverage.length!==79)throw Error('지방 지역 범위 확인 실패');
   const mapping=new Map(universe.map(r=>[r.region_code,r.region]));
-  if(new Set(data.coverage.map(r=>r.region_code)).size!==79||data.coverage.some(r=>mapping.get(r.region_code)!==r.region)||data.rows.some(r=>mapping.get(r.region_code)!==r.region||r.rent_source==='ACTUAL'))throw Error('지방 canonical 범위·전세 원천 불일치');
+  if(new Set(data.coverage.map(r=>r.region_code)).size!==79||data.coverage.some(r=>mapping.get(r.region_code)!==r.region)||data.rows.some(r=>mapping.get(r.region_code)!==r.region))throw Error('지방 canonical 범위 불일치');
   const sales=new Set(data.rows.filter(r=>r.sale.current!==null).map(r=>r.region_code));
   if(data.coverage.some(r=>(r.status==='AVAILABLE')!==sales.has(r.region_code)||!['AVAILABLE','NO_VALID_SALE'].includes(r.status)))throw Error('지방 coverage 불일치');
  }else if(data.lane&&data.lane!=='capital'||data.scope.regions!==69||new Set(data.rows.map(r=>r.region)).size!==69)throw Error('수도권 지역 범위 확인 실패');
@@ -41,18 +41,27 @@ function validate(data){
   if(!r.name||!r.region||!r.id||!/^\d{5}$/.test(r.region_code)||!r.sale||!r.rent)throw Error('단지 확인 실패');
   for(const trade of ['sale','rent'])for(const k of ['current','two_weeks','four_weeks'])if(r[trade][k]!==null&&(r[trade][k]===''||!Number.isFinite(Number(r[trade][k]))||Number(r[trade][k])<=0))throw Error('유효하지 않은 호가');
   if(!regionCode&&r.sale.current===null)throw Error('최고호가 매매 결측');
-  if(r.rent_source==='QUOTE'){
-   if(r.applied_rent!==r.rent.current||r.rent.current===null||r.rent_reference!==null)throw Error('전세호가 우선순위 불일치');
-  }else if(r.rent_source==='ACTUAL'){
-   if(r.rent.current!==null||!r.rent_reference||r.applied_rent!==r.rent_reference.price_eok||!r.rent_reference.months.length||r.rent_reference.count<=0)throw Error('실거래 대체 근거 누락');
-   const ref=r.rent_reference;
+  for(const trade of ['sale','rent']){
+   const source=r[trade+'_source'],applied=r['applied_'+trade],ref=r[trade+'_reference'],quote=r[trade].current;
+   const provenance=r[trade+'_provenance'];
+   if(!provenance||provenance.source!==source||provenance.asof_month!==data.round.slice(0,6)||!Array.isArray(provenance.observation_months))throw Error('가격 provenance 누락');
+   if(applied!==null&&(!Number.isFinite(Number(applied))||Number(applied)<=0))throw Error('적용가격 오류');
+   if(r[trade+'_asof_month']!==data.round.slice(0,6))throw Error('적용 기준월 불일치');
+   if(source==='QUOTE'){
+    if(applied!==quote||quote===null||ref!==null)throw Error('호가 우선순위 불일치');
+    if(provenance.count_kind!=='LISTINGS'||!Number.isInteger(provenance.count)||provenance.count<=0||provenance.observation_months.length!==1||!provenance.observed_at)throw Error('호가 관측 근거 누락');
+   }else if(source==='ACTUAL'){
+    if(quote!==null||!ref||applied!==ref.price_eok||!ref.months.length||ref.count<=0)throw Error('실거래 대체 근거 누락');
+    if(provenance.count_kind!=='TRANSACTIONS'||provenance.count!==ref.count||JSON.stringify(provenance.observation_months)!==JSON.stringify(ref.months))throw Error('실거래 provenance 불일치');
    if(ref.months.some(m=>m<ref.window_from||m>ref.window_to)||ref.months.length>3||ref.latest_month!==ref.months[ref.months.length-1])throw Error('실거래 기간 확인 실패');
-  }else if(r.rent_source!=='NONE'||r.applied_rent!==null||r.rent.current!==null||r.rent_reference!==null)throw Error('전세 결측 상태 불일치');
-  const valid=r.sale.current!==null&&r.applied_rent!==null;
+   }else if(source!=='NONE'||applied!==null||quote!==null||ref!==null)throw Error('가격 결측 상태 불일치');
+   if(source==='NONE'&&(provenance.count!==0||provenance.observation_months.length))throw Error('부재 provenance 불일치');
+  }
+  const valid=r.applied_sale!==null&&r.applied_rent!==null;
   if(valid){
    if(r.gap_eok===null||r.rent_ratio_percent===null||r.rent_ratio_display===null||!Number.isFinite(Number(r.gap_eok))||!Number.isFinite(Number(r.rent_ratio_percent)))throw Error('지표 누락');
-   if(Math.abs(Number(r.gap_eok)-(Number(r.sale.current)-Number(r.applied_rent)))>1e-8||Math.abs(Number(r.rent_ratio_percent)-Number(r.applied_rent)/Number(r.sale.current)*100)>1e-8)throw Error('지표 값 불일치');
-   if(r.metrics_basis!==(r.rent_source==='ACTUAL'?'MIXED_REFERENCE':'QUOTE'))throw Error('지표 출처 불일치');
+   if(Math.abs(Number(r.gap_eok)-(Number(r.applied_sale)-Number(r.applied_rent)))>1e-8||Math.abs(Number(r.rent_ratio_percent)-Number(r.applied_rent)/Number(r.applied_sale)*100)>1e-8)throw Error('지표 값 불일치');
+   if(r.metrics_basis!==([r.sale_source,r.rent_source].includes('ACTUAL')?'MIXED_REFERENCE':'QUOTE'))throw Error('지표 출처 불일치');
   }else if(r.gap_eok!==null||r.rent_ratio_percent!==null||r.rent_ratio_display!==null||r.metrics_basis!=='UNAVAILABLE')throw Error('결측 지표 거부');
  }
 }
@@ -61,10 +70,10 @@ function regionLink(r,cls,text){
  if(!regionCode){n.href=`?region=${r.region_code}`;n.title=`${r.region} ${area}㎡ 수집 아파트 전체 보기`;n.classList.add('region-link');}
  return n;
 }
-function rentNote(r){
- if(r.rent_source!=='ACTUAL')return null;
- const ref=r.rent_reference,n=el('span','actual-reference',`실거래 대체 · ${ym(ref.latest_month)}`);
- n.title=`국토부 전세 실거래 강건가 · 관측월 ${ref.months.map(ym).join(', ')} · ${ref.count}건 · 최근 12개월 중 마지막 최대 3개 실거래 월평균의 중앙값 · 이월 없음`;
+function rentNote(r,trade='rent'){
+ if(r[trade+'_source']!=='ACTUAL')return null;
+ const ref=r[trade+'_reference'],n=el('span','actual-reference',`호가 없음 · 실거래 대체 강건가 · ${ym(ref.latest_month)}`);
+ n.title=`국토부 ${trade==='sale'?'매매':'전세'} 실거래 강건가 · 적용 기준월 ${ym(r[trade+'_asof_month'])} · 관측월 ${ref.months.map(ym).join(', ')} · ${ref.count}건 · 최근 12개월 중 마지막 최대 3개 실거래 월평균의 중앙값 · 이월 없음`;
  return n;
 }
 function quoteCell(value,kind,divider=false){
@@ -73,34 +82,34 @@ function quoteCell(value,kind,divider=false){
  if(kind!=='current')badge.title=descriptions[kind];td.append(badge);return td;
 }
 function makeRow(r){
- const tr=el('tr');tr.dataset.id=r.id;tr.dataset.region=r.region;tr.dataset.regionCode=r.region_code;tr.dataset.rentSource=r.rent_source;
+ const tr=el('tr');tr.dataset.id=r.id;tr.dataset.region=r.region;tr.dataset.regionCode=r.region_code;tr.dataset.rentSource=r.rent_source;tr.dataset.saleSource=r.sale_source;
  tr.append(el('td','rank',String(r.order)));
  const name=el('td','name');name.append(regionLink(r,'region',r.region),regionLink(r,'unit',r.name));
  if(r.tie_count>1)name.append(el('span','review',`지역 내 동률 ${r.tie_count}개 단지`));
  if(r.manual_review)name.append(el('span','review','소수매물·평형 역전 수동확인'));
  tr.append(name);
  for(const trade of ['sale','rent'])for(const key of ['current','two_weeks','four_weeks']){
-  const td=quoteCell(trade==='rent'&&key==='current'?r.applied_rent:r[trade][key],key==='current'?'current':r.changes[trade][key],trade==='rent'&&key==='current');
-  if(trade==='rent'&&key==='current'){const note=rentNote(r);if(note)td.append(note);}
+  const td=quoteCell(key==='current'?r['applied_'+trade]:r[trade][key],key==='current'?'current':r.changes[trade][key],trade==='rent'&&key==='current');
+  if(key==='current'){const note=rentNote(r,trade);if(note)td.append(note);}
   tr.append(td);
  }
  for(const [cls,value] of [['gap',metric(r.gap_eok)],['ratio',r.rent_ratio_display===null?'':r.rent_ratio_display]]){
   const td=el('td',`metric ${cls==='gap'?'divider ':''}${cls}`);td.append(el('span','metric-value',value));
-  if(r.metrics_basis==='MIXED_REFERENCE'){td.append(el('small','mixed-note','참고치'));td.title='현재 매매호가와 전세 실거래 강건가를 혼합한 참고치';}
+  if(r.metrics_basis==='MIXED_REFERENCE'){td.append(el('small','mixed-note','참고치'));td.title='적용 매매·전세 중 실거래 강건가가 포함된 참고치';}
   tr.append(td);
  }
  return tr;
 }
 function makeCard(r){
- const card=el('article','unit-card');card.dataset.id=r.id;card.dataset.region=r.region;card.dataset.rentSource=r.rent_source;
+ const card=el('article','unit-card');card.dataset.id=r.id;card.dataset.region=r.region;card.dataset.rentSource=r.rent_source;card.dataset.saleSource=r.sale_source;
  const header=el('div','card-heading'),identity=el('div');
  header.append(el('span','card-rank',String(r.order)));identity.append(regionLink(r,'region',r.region),regionLink(r,'unit',r.name));
  if(r.tie_count>1)identity.append(el('span','review',`지역 내 동률 ${r.tie_count}개 단지`));
  if(r.manual_review)identity.append(el('span','review','소수매물·평형 역전 수동확인'));
  header.append(identity);card.append(header);const grid=el('div','current-grid');
- for(const [label,value,unit,cls] of [['매매',fmt(r.sale.current),r.sale.current===null?'':'억','sale'],['전세',fmt(r.applied_rent),r.applied_rent===null?'':'억','rent'],['현재 갭',metric(r.gap_eok),r.gap_eok===null?'':'억','gap'],['전세가율',r.rent_ratio_display===null?'':r.rent_ratio_display,r.rent_ratio_display===null?'':'%','ratio']]){
+ for(const [label,value,unit,cls] of [['매매',fmt(r.applied_sale),r.applied_sale===null?'':'억','sale'],['전세',fmt(r.applied_rent),r.applied_rent===null?'':'억','rent'],['현재 갭',metric(r.gap_eok),r.gap_eok===null?'':'억','gap'],['전세가율',r.rent_ratio_display===null?'':r.rent_ratio_display,r.rent_ratio_display===null?'':'%','ratio']]){
   const box=el('div'),strong=el('strong',cls,value);box.append(el('label','',label));if(unit)strong.append(el('small','',unit));box.append(strong);
-  if(cls==='rent'){const note=rentNote(r);if(note)box.append(note);}
+  if(['sale','rent'].includes(cls)){const note=rentNote(r,cls);if(note)box.append(note);}
   if(['gap','ratio'].includes(cls)&&r.metrics_basis==='MIXED_REFERENCE')box.append(el('small','mixed-note','실거래 혼합 참고치'));
   grid.append(box);
  }
@@ -138,9 +147,10 @@ function apply(data){
   $('coverage-notice').hidden=false;
   $('history-notice').textContent=['two_weeks','four_weeks'].filter(k=>data.history[k].status!=='COMMITTED_VERIFIED').map(k=>`${dotDate(data.dates[k])}: ${data.history[k].reason}`).join(' / ');$('history-notice').hidden=!$('history-notice').textContent;
  }
- $('top-price').textContent=fmt(first.sale.current);$('top-name').textContent=first.name;$('top-region').textContent=first.region;
+ const quoteLeader=data.rows.filter(r=>r.sale.current!==null).sort((a,b)=>Number(b.sale.current)-Number(a.sale.current))[0];
+ $('top-price').textContent=fmt(quoteLeader?.sale.current??null);$('top-name').textContent=quoteLeader?.name||'유효 매매호가 없음';$('top-region').textContent=quoteLeader?.region||first.region;
  if(regionCode){
-  $('title').textContent=`${first.region} ${area}㎡`;document.querySelector('.intro').textContent='수집 아파트 전체 · 매매가격 높은 순 · 호가 없는 단지도 마지막에 표시';
+  $('title').textContent=`${first.region} ${area}㎡`;document.querySelector('.intro').textContent='수집 아파트 전체 · 적용매매 높은 순 · 호가 없으면 강건가 대체 · 미산출은 마지막';
   $('list-title').textContent=`${first.region} ${area}㎡ 전체 가격순`;
   document.querySelector('.price-note').textContent='이 지역 수집 단지 중 가장 높은 최저 매매호가';
   document.title=`엔비 · ${first.region} ${area}㎡ 전체 가격순`;
@@ -149,8 +159,8 @@ function apply(data){
  for(const [id,value] of [['row-count',data.counts.rows],['metric-count',data.counts.with_metrics],['missing-count',data.counts.without_metrics]])$(id).replaceChildren(document.createTextNode(String(value)),el('small','','단지'));
  $('round-label').textContent=`확정 회차 ${dotDate(data.round)} · 비교 ${dotDate(data.dates.two_weeks)} / ${dotDate(data.dates.four_weeks)}`;
  $('observed-label').textContent=`현재 호가 실제 관측 ${obsDate(data.observed_from)}–${obsDate(data.observed_to)} KST · 단위 억 원`;
- const replaced=data.rows.filter(r=>r.rent_source==='ACTUAL').length;
- $('rent-summary').textContent=local?'지방 전세호가만 적용 · 실거래 품질검증 연결 전 대체하지 않음 · 근거 없으면 공란':`전세호가 우선 · 실거래 강건가 대체 ${replaced}단지 · 사용 가능 기간 ${ym(data.rent_policy.window_from)}–${ym(data.rent_policy.window_to)} · 실거래 원천 ${ym(data.rent_policy.source_through)}까지`;
+ const replaced=data.rows.filter(r=>r.rent_source==='ACTUAL').length,saleReplaced=data.rows.filter(r=>r.sale_source==='ACTUAL').length;
+ $('rent-summary').textContent=`매매·전세 각각 호가 우선 · 호가 없으면 실거래 강건가 대체: 매매 ${saleReplaced} / 전세 ${replaced}단지 · 사용 가능 기간 ${ym(data.rent_policy.window_from)}–${ym(data.rent_policy.window_to)} · 실거래 원천 ${ym(data.rent_policy.source_through)}까지 · 최고호가는 대체가격 제외${local?' · 지방 실거래는 설명용 MATCH_HOLD (identity 인증·모델/매수 승인 아님)':''}`;
  const policy=data.collection_policy,notices=[];
  if(policy){
   const exclusions=policy.excluded.filter(r=>!regionCode||r.region_code===regionCode);
@@ -185,8 +195,8 @@ async function load(){
 }
 $('download-csv').addEventListener('click',event=>{
  if(!regionCode||!snapshot)return;event.preventDefault();
- const header=['지역','단지','평형','순위','매매현재','매매2주','매매4주','적용전세','전세2주','전세4주','갭','전세가율','전세출처','실거래기준월','실거래관측월','실거래건수','지표기준'];
- const lines=[header,...snapshot.rows.map(r=>[r.region,r.name,area,r.order,r.sale.current,r.sale.two_weeks,r.sale.four_weeks,r.applied_rent,r.rent.two_weeks,r.rent.four_weeks,r.gap_eok,r.rent_ratio_percent,r.rent_source,r.rent_reference?.latest_month,r.rent_reference?.months.join(' / '),r.rent_reference?.count,r.metrics_basis])];
+ const header=['지역','단지','평형','순위','매매현재','매매2주','매매4주','적용전세','전세2주','전세4주','갭','전세가율','전세출처','실거래기준월','실거래관측월','실거래건수','지표기준','적용매매','매매출처','매매적용기준월','매매실거래기준월','매매실거래관측월','매매실거래건수','전세적용기준월','전세현재호가','매매관측월','매매근거건수','매매건수종류','전세관측월','전세근거건수','전세건수종류'];
+ const lines=[header,...snapshot.rows.map(r=>[r.region,r.name,area,r.order,r.sale.current,r.sale.two_weeks,r.sale.four_weeks,r.applied_rent,r.rent.two_weeks,r.rent.four_weeks,r.gap_eok,r.rent_ratio_percent,r.rent_source,r.rent_reference?.latest_month,r.rent_reference?.months.join(' / '),r.rent_reference?.count,r.metrics_basis,r.applied_sale,r.sale_source,r.sale_asof_month,r.sale_reference?.latest_month,r.sale_reference?.months.join(' / '),r.sale_reference?.count,r.rent_asof_month,r.rent.current,...['sale','rent'].flatMap(t=>[r[t+'_provenance'].observation_months.join(','),r[t+'_provenance'].count,r[t+'_provenance'].count_kind])])];
  const csv=lines.map(row=>row.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
  const url=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'})),a=el('a');a.href=url;a.download=`${(snapshot.rows[0]?.region||snapshot.selected_region)}_${area}_${snapshot.round}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });

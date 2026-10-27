@@ -127,6 +127,15 @@ function apply(data){
  $('observed-label').textContent=`현재 호가 실제 관측 ${obsDate(data.observed_from)}–${obsDate(data.observed_to)} KST · 단위 억 원`;
  const replaced=data.rows.filter(r=>r.rent_source==='ACTUAL').length;
  $('rent-summary').textContent=`전세호가 우선 · 실거래 강건가 대체 ${replaced}단지 · 사용 가능 기간 ${ym(data.rent_policy.window_from)}–${ym(data.rent_policy.window_to)} · 실거래 원천 ${ym(data.rent_policy.source_through)}까지`;
+ const policy=data.collection_policy,notices=[];
+ if(policy){
+  const exclusions=policy.excluded.filter(r=>!regionCode||r.region_code===regionCode);
+  const exceptions=policy.mixed_use_exceptions.filter(r=>!regionCode||r.region_code===regionCode);
+  const pending=new Set(policy.pending_inclusions.map(r=>r.region_code+':'+r.id));
+  if(exclusions.length)notices.push(exclusions.map(r=>r.name).join(' · ')+' 제외');
+  for(const r of exceptions)notices.push(r.name+' 포함 예외'+(pending.has(r.region_code+':'+r.id)?' · 이번 확정 회차 미수집, 다음 수도권 수집 대상':' · 주상복합 제외 규칙의 단지별 예외'));
+ }
+ $('collection-policy').textContent=notices.join(' / ');$('collection-policy').hidden=!notices.length;
  $('connection').textContent='확정 자료 · 검증 통과';document.body.dataset.error='false';
  const old=Date.now()-new Date(data.observed_to).getTime()>21*24*60*60*1000;
  $('error').hidden=!old;if(old)$('error').textContent='최근 관측으로부터 3주 이상 지난 자료입니다. 회차·관측일을 확인해 주세요.';

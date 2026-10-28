@@ -3,6 +3,10 @@
 (() => {
 const area=Number(document.body.dataset.area),$=id=>document.getElementById(id);
 const regionCode=new URLSearchParams(location.search).get('region');
+// Arrival from an investment-review page: highlight that complex once (2026-10-29).
+const query=new URLSearchParams(location.search);
+const focusId=/^\d{1,8}$/.test(query.get('focus')||'')?query.get('focus'):null,fromGap=/^gap\d{1,2}$/.test(query.get('from')||'')?query.get('from'):null;
+let focusDone=false;
 const lane=document.body.dataset.lane||'capital',local=lane==='local_major',prefix=local?'local-':'';
 for(const a of document.querySelectorAll('[data-lane-tab]'))a.setAttribute('aria-selected',String(a.dataset.laneTab===lane));
 if(local){
@@ -23,6 +27,8 @@ for(const a of document.querySelectorAll('[data-tab]')){
  if(regionCode&&/^\d{5}$/.test(regionCode))a.href=`../${prefix}${a.dataset.tab}/?region=${regionCode}`;
 }
 $('back-to-regions').hidden=!regionCode;
+if(regionCode&&fromGap){const a=el('a','back-link invest-back','← 투자 검토로 돌아가기');a.id='back-to-invest';a.href=`../${prefix}invest/#${fromGap}`;$('back-to-regions').after(a);}
+const focusMark=(r,node,label)=>{if(focusId&&String(r.id)===focusId){node.classList.add('is-focus');label.append(el('span','focus-badge','투자 검토 단지'));}};
 function validate(data){
  if(data.schema_version!==2||data.area!==area||!Array.isArray(data.rows)||!data.rows.length)throw Error('자료 형식·평형 확인 실패');
  if(local){
@@ -87,7 +93,7 @@ function makeRow(r){
  const name=el('td','name');name.append(regionLink(r,'region',r.region),regionLink(r,'unit',r.name));
  if(r.tie_count>1)name.append(el('span','review',`지역 내 동률 ${r.tie_count}개 단지`));
  if(r.manual_review)name.append(el('span','review','소수매물·평형 역전 수동확인'));
- tr.append(name);
+ focusMark(r,tr,name);tr.append(name);
  for(const trade of ['sale','rent'])for(const key of ['current','two_weeks','four_weeks']){
   const td=quoteCell(key==='current'?r['applied_'+trade]:r[trade][key],key==='current'?'current':r.changes[trade][key],trade==='rent'&&key==='current');
   if(key==='current'){const note=rentNote(r,trade);if(note)td.append(note);}
@@ -106,7 +112,7 @@ function makeCard(r){
  header.append(el('span','card-rank',String(r.order)));identity.append(regionLink(r,'region',r.region),regionLink(r,'unit',r.name));
  if(r.tie_count>1)identity.append(el('span','review',`지역 내 동률 ${r.tie_count}개 단지`));
  if(r.manual_review)identity.append(el('span','review','소수매물·평형 역전 수동확인'));
- header.append(identity);card.append(header);const grid=el('div','current-grid');
+ focusMark(r,card,identity);header.append(identity);card.append(header);const grid=el('div','current-grid');
  for(const [label,value,unit,cls] of [['매매',fmt(r.applied_sale),r.applied_sale===null?'':'억','sale'],['전세',fmt(r.applied_rent),r.applied_rent===null?'':'억','rent'],['현재 갭',metric(r.gap_eok),r.gap_eok===null?'':'억','gap'],['전세가율',r.rent_ratio_display===null?'':r.rent_ratio_display,r.rent_ratio_display===null?'':'%','ratio']]){
   const box=el('div'),strong=el('strong',cls,value);box.append(el('label','',label));if(unit)strong.append(el('small','',unit));box.append(strong);
   if(['sale','rent'].includes(cls)){const note=rentNote(r,cls);if(note)box.append(note);}
@@ -134,6 +140,7 @@ function renderRows(){
  $('rows').replaceChildren(desktop);$('mobile-cards').replaceChildren(mobile);$('no-results').hidden=rows.length!==0;
  $('result-count').textContent=`${new Set(rows.map(r=>r.region)).size}지역 · ${rows.length}단지 / 전체 ${snapshot.counts.rows}단지`;
  document.body.dataset.ready='true';document.body.dataset.visible=String(rows.length);
+ if(focusId&&!focusDone){const target=[...document.querySelectorAll('.is-focus')].find(n=>n.offsetParent!==null);if(target){focusDone=true;target.scrollIntoView({block:'center'});}}
 }
 function apply(data){
  snapshot=data;const first=data.rows[0]||{name:'이 평형 수집 단지 없음',region:data.selected_region,sale:{current:null}};

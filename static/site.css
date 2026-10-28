@@ -30,3 +30,37 @@ a.inv-link{color:#e3edf2;text-decoration:none;border-bottom:1px dotted #79dfcd99
 tr.is-focus td{background:#79dfcd1f}.unit-card.is-focus{background:#79dfcd12;border-radius:10px;box-shadow:0 0 0 1px #79dfcd66}.focus-badge{display:inline-block;margin-left:6px;font-size:9px;padding:1px 6px;border-radius:5px;background:#79dfcd24;color:var(--accent);vertical-align:middle}.invest-back{display:inline-block;margin-left:14px}
 @media(max-width:760px){.inv-timing{padding:16px 14px;border-radius:14px;margin-bottom:18px}.inv-timing-head{flex-wrap:wrap}.inv-timing-head h2{font-size:16px}.inv-verdict{font-size:15px;padding:5px 11px}.inv-rules,.inv-rules[data-count="2"]{grid-template-columns:1fr;gap:8px}.inv-rule{padding:11px 13px}.inv-rule strong{font-size:20px}.inv-district{font-size:10px}.inv-district th,.inv-district td{padding:4px 6px}.inv-tab-flag{font-size:8px}.invest-back{display:block;margin:6px 0 0}}
 @media(max-width:760px){.inv-tab{flex:1 1 28%;min-width:0}body[data-lane="local_major"] .inv-tab{flex-basis:40%}.inv-tab-label{white-space:nowrap}}@media(max-width:380px){.inv-tab-prefix{display:none}}
+/* investment review 2026-10-29 (2): timing charts and the local region list */
+.inv-charts{display:grid;gap:16px;margin-top:18px}.inv-figure{margin:0;padding:16px 18px 12px;border:1px solid #273c4590;border-radius:12px;background:#0f171c;min-width:0}
+.inv-figure figcaption strong{display:block;font-size:14px;color:var(--ink);font-weight:700}.inv-figure figcaption span{display:block;margin-top:3px;font-size:11px;color:var(--muted);line-height:1.6}
+.inv-figure-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin-top:10px}.inv-figure-tools .inv-legend{margin:0}
+.inv-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:10px 0 2px;font-size:10px;color:#9fb4bf}.inv-legend span{white-space:nowrap}
+.inv-legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}.inv-legend i.box{width:10px;height:10px;border-radius:2px}
+.inv-legend i.t1{background:#cde2fb}.inv-legend i.t2{background:#9ec5f4}.inv-legend i.t3{background:#6da7ec}.inv-legend i.t4{background:#3987e5}.inv-legend i.t5{background:#256abf}
+.inv-legend i.go{background:#79dfcd33;border:1px solid #79dfcd66}.inv-legend i.wait{background:#d9c48e3d;border:1px solid #d9c48e80}.inv-legend i.stop{background:#ffb0a93d;border:1px solid #ffb0a980}
+.inv-legend i.in{background:#d7e3ea}.inv-legend i.out{background:#4e5f68}
+.inv-chart{position:relative;width:100%;min-width:0;margin-top:6px}.inv-svg{display:block;max-width:100%;overflow:visible;touch-action:pan-y}
+.inv-svg .wash.go{fill:#79dfcd;fill-opacity:.07}.inv-svg .wash.wait{fill:#d9c48e;fill-opacity:.12}.inv-svg .wash.stop{fill:#ffb0a9;fill-opacity:.13}
+.inv-svg .grid{stroke:#1f2b32;stroke-width:1}.inv-svg .axis{stroke:#34444d;stroke-width:1}.inv-svg .zero{stroke:#7f99a7;stroke-width:1}
+.inv-svg text{font-family:inherit}.inv-svg .tick{fill:#7f99a7;font-size:10px}
+.inv-svg .tier{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}.inv-svg .end-dot{fill:#d7e3ea;stroke:#0f171c;stroke-width:2}.inv-svg .tier-dot{stroke:#0f171c;stroke-width:2}
+.inv-svg .end-label{fill:#dfe8ec;font-size:10.5px;font-weight:600}.inv-svg .band-name{fill:#c9d6dd;font-size:10.5px;font-weight:700}.inv-svg .band-period{fill:#8eabb9;font-size:9px}
+.inv-svg .now{stroke:#ffb0a9;stroke-width:1;stroke-dasharray:2 3}.inv-svg .now-label{fill:#ffb0a9;font-size:10.5px;font-weight:700}
+.inv-svg .sig{fill:none;stroke:#d7e3ea;stroke-width:1.7;stroke-linejoin:round;stroke-linecap:round}.inv-svg .thr{stroke:#9fb4bf;stroke-width:1;stroke-dasharray:4 3}.inv-svg .thr-label{fill:#9fb4bf;font-size:9.5px}
+.inv-svg .bar-in{fill:#d7e3ea}.inv-svg .bar-out{fill:#4e5f68}.inv-svg .seg-label{fill:#eaf2f5;font-size:10px;font-weight:700}.inv-svg .note{fill:#7f99a7;font-size:9.5px}
+.inv-svg .guide{stroke:#eaf2f599;stroke-width:1}.inv-svg .hit{fill:transparent;cursor:crosshair}
+.inv-tip{position:absolute;z-index:3;pointer-events:none;padding:7px 9px;border-radius:8px;background:#0b1114f2;border:1px solid #34444d;font-size:11px;line-height:1.55;color:#dfe8ec;white-space:nowrap;box-shadow:0 6px 18px #0009}
+.inv-tip strong{display:block;font-size:11px}.inv-tip span{display:block;color:#b9c8d0}
+.inv-seg{display:inline-flex;gap:4px}.inv-seg button{min-height:34px;min-width:52px;padding:4px 12px;border-radius:8px;border:1px solid var(--line);background:#0f171c;color:var(--muted);font-size:12px;cursor:pointer}
+.inv-seg button[aria-pressed="true"]{border-color:#79dfcd80;color:var(--ink);background:#79dfcd14}
+.inv-chart-note{margin:8px 0 0;font-size:10px;color:#7e98a7;line-height:1.7}.inv-chart-hold{margin:12px 0 0;font-size:11px;color:var(--gold)}
+.inv-rule .inv-sub{margin:0 0 2px;color:#7e98a7}.inv-rule .inv-chart-mini{margin-top:10px}
+.inv-regions{margin-top:16px;padding:14px 16px;border:1px solid #273c4590;border-radius:12px;background:#0f171c}.inv-regions-head strong{display:block;font-size:15px;color:var(--accent)}.inv-regions-head span{display:block;margin-top:3px;font-size:11px;color:var(--muted)}
+.inv-region-groups{display:grid;gap:7px;margin-top:12px}.inv-region-group{display:grid;grid-template-columns:62px 1fr;gap:10px;align-items:baseline}
+.inv-prov{font-size:11px;font-weight:700;color:#c9d6dd;white-space:nowrap}.inv-region-names{display:flex;flex-wrap:wrap;gap:4px 6px}
+.inv-region{display:inline-block;padding:2px 8px;border-radius:6px;background:#79dfcd12;border:1px solid #79dfcd33;font-size:12px;line-height:1.6;color:#e3edf2}
+a.inv-region.inv-link{border-bottom:1px solid #79dfcd33;text-decoration:none}a.inv-region.inv-link:hover,a.inv-region.inv-link:focus-visible{border-color:var(--accent);color:var(--accent)}
+.inv-regions .inv-details ul{columns:2}
+@media(max-width:760px){.inv-figure{padding:12px 10px 10px}.inv-figure figcaption strong{font-size:13px}.inv-seg button{min-width:46px;padding:4px 8px}.inv-region-group{grid-template-columns:1fr;gap:4px}.inv-region{font-size:11px;padding:2px 7px}.inv-regions{padding:12px}.inv-regions .inv-details ul{columns:1}}
+.inv-svg .seg-label.small{font-size:9px}
+.inv-legend em{font-style:normal}

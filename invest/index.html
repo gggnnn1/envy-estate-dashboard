@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#090e11"><meta name="description" content="엔비 수도권 투자 검토. 확정 호가 회차 뒤 투자모델(갭 4·8·12억)의 검증 완료 산출물을 표시합니다."><title>엔비 · 수도권 투자 검토</title><link rel="stylesheet" href="../static/site.css?v=0a8c5f7900fd"><script defer src="../static/invest.js?v=7e6698b3a595"></script></head>
+<body data-lane="capital" data-view="invest" data-data="invest">
+<div class="shell">
+<header class="topbar"><a class="brand" href="../84/" aria-label="엔비 대시보드 홈"><span class="brand-icon" aria-hidden="true">E<span></span></span><span><strong>ENVY <span class="brand-word">엔비</span></strong><small>부동산 데이터 데스크</small></span></a><div class="connection"><span class="status-dot"></span><span id="connection">검증 자료 확인 중</span></div></header>
+<nav class="lane-nav" aria-label="수집 권역"><a href="../invest/" data-lane-tab="capital">수도권</a><a href="../local-invest/" data-lane-tab="local_major">지방</a></nav>
+<nav class="area-nav" aria-label="전용면적별 페이지"><a href="../84/" data-tab="84">84<span>㎡</span></a><a href="../59/" data-tab="59">59<span>㎡</span></a><a href="./" class="invest-tab" aria-current="page">투자 검토</a><span>수도권 갭 4·8·12억</span></nav>
+<main>
+<section class="summary inv-summary" aria-label="투자 검토 기준"><div><span>호가 확정 회차</span><strong id="round-value">–</strong></div><div><span>시장 판정</span><strong id="gate-value">–</strong></div><div><span>검증 완료 예산</span><strong id="ready-value">–</strong></div><div><span>모델 자료월</span><strong id="month-value">–</strong></div></section>
+<div id="error" role="alert" hidden></div>
+<section class="list-panel" aria-labelledby="list-title">
+<div class="section-heading"><div><p class="eyebrow">INVESTMENT REVIEW</p><h2 id="list-title">투자 검토 <span>수도권 갭 4·8·12억</span></h2></div></div>
+<div class="data-meta"><p id="round-label">회차 확인 중</p><p id="source-label">출처: 엔비 확정 호가 회차 · 국토부 실거래 기반 강건가·전세 · 엔비 투자모델 검증 영수증 일치분</p></div>
+<div class="inv-tabs" role="tablist" aria-label="갭 예산" id="budget-tabs"></div>
+<div id="budget-panels"></div>
+</section>
+<section class="method"><h2>어떻게 읽나요?</h2><div><p><strong>무엇을 보여주나</strong>격주 호가가 확정(COMMITTED)되면 엔비가 기존 투자모델을 그 회차로 실행합니다. 이 페이지는 검증 영수증(산출물 SHA-256)이 일치한 결과만 그대로 옮깁니다. 새로 계산하거나 점수를 만들지 않습니다.</p><p><strong>수도권과 지방</strong>수도권은 C 모델(XGBoost 장기이력, 2026-09-26 동결)의 4년 비교 순위 TOP10입니다. 지방은 갭투자 기준 v7.1 정본의 RP 후보 TOP5이며, 호가는 표시만 하고 후보를 다시 고르지 않습니다.</p><p><strong>전세와 갭</strong>적용 전세는 전세호가 또는 모델 전세입니다. 호가 갭은 매매호가 − 적용 전세입니다. 현재 전세호가가 없거나 모델 전세보다 5% 넘게 높으면 HOLD로 표시하며, 계약 가능한 갭으로 해석하지 않습니다.</p><p><strong>보류와 결측</strong>계산 중·실패·검증 불가 예산은 결과 대신 상태와 사유를 표시합니다. 값이 없으면 —로 둡니다. 순위는 매수 추천이 아니며 세금·거래비용은 별도입니다.</p></div></section>
+</main><footer><span>ENVY DATA DESK</span><p>격주 확정 회차 기준 · 화면은 5분마다 새 발행 확인<br>투자 검토 순위는 모델 추적 후보이며 매수 추천이 아닙니다.</p><button id="refresh" type="button">지금 확인 ↻</button></footer>
+</div><noscript>JavaScript를 켜야 투자 검토 결과를 볼 수 있습니다.</noscript>
+</body></html>

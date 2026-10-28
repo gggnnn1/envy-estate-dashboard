@@ -147,12 +147,8 @@ function apply(data){
   $('coverage-notice').hidden=false;
   $('history-notice').textContent=['two_weeks','four_weeks'].filter(k=>data.history[k].status!=='COMMITTED_VERIFIED').map(k=>`${dotDate(data.dates[k])}: ${data.history[k].reason}`).join(' / ');$('history-notice').hidden=!$('history-notice').textContent;
  }
- const quoteLeader=data.rows.filter(r=>r.sale.current!==null).sort((a,b)=>Number(b.sale.current)-Number(a.sale.current))[0];
- $('top-price').textContent=fmt(quoteLeader?.sale.current??null);$('top-name').textContent=quoteLeader?.name||'유효 매매호가 없음';$('top-region').textContent=quoteLeader?.region||first.region;
  if(regionCode){
-  $('title').textContent=`${first.region} ${area}㎡`;document.querySelector('.intro').textContent='수집 아파트 전체 · 적용매매 높은 순 · 호가 없으면 강건가 대체 · 미산출은 마지막';
   $('list-title').textContent=`${first.region} ${area}㎡ 전체 가격순`;
-  document.querySelector('.price-note').textContent='이 지역 수집 단지 중 가장 높은 최저 매매호가';
   document.title=`엔비 · ${first.region} ${area}㎡ 전체 가격순`;
  }
  $('region-count').replaceChildren(document.createTextNode(regionCode?'1':String(data.scope.regions)),el('small','','곳'));

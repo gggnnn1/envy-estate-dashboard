@@ -7,7 +7,8 @@ const ORDER=capital?[4,8,12,16,20]:[1,2,3,4];
 const TRAINING_GAP=10;  // C model training gaps are below 10억; larger budgets are extrapolation
 const MODEL=capital?'C_XGBOOST_LONG_HISTORY_20260926':'local_v7.1';
 const MODEL_LABEL=capital?'C 모델(XGBoost 장기이력, 2026-09-26 동결) · 4년 비교 TOP10':'지방 갭투자 기준 v7.1 정본 · RP 후보 TOP5';
-const STATUS={READY:'검증 완료',PENDING:'계산 중',FAILED:'실패 · 보류',HOLD:'보류'};
+// 'READY' means the receipt-verified output was found; it says nothing about the market or the candidates (2026-10-29 (3)).
+const STATUS={READY:'자료 검증',PENDING:'계산 중',FAILED:'실패 · 보류',HOLD:'보류'};
 const HOLD_LABEL={REFERENCE_ONLY:'전세호가 반영 · 참고',HOLD_NO_CURRENT_RENT:'HOLD · 현재 전세호가 없음',HOLD_RENT_QUOTE_ABOVE_RP_5PCT:'HOLD · 전세호가가 모델 전세 +5% 초과'};
 const EXCLUSION_LABEL={outside_requested_quote_gap:'요청 갭 범위 밖',no_sale_quote:'매매호가 없음',collection_not_ok:'수집 상태 불량',no_quote_match:'호가 매칭 없음'};
 const VERDICT_CLASS={'진입 금지(과열)':'stop','보류(전세가율 부족)':'wait','진입 가능':'go','통과':'go','진입 금지':'stop'};
@@ -17,7 +18,9 @@ const RAMP=['#cde2fb','#9ec5f4','#6da7ec','#3987e5','#256abf'];  // 1급지(brig
 const PROVINCE_ORDER=['서울','부산','대구','인천','광주','대전','울산','세종','경기','강원','충북','충남','전북','전남','경북','경남','제주'];
 let horizon='4',drawnWidth=0,regimeText='';
 for(const a of document.querySelectorAll('[data-lane-tab]'))a.setAttribute('aria-selected',String(a.dataset.laneTab===lane));
-let snapshot=null,busy=false,selected=null;
+let snapshot=null,busy=false,selected=null,lastTag=null;
+// View filters (2026-10-29 (3)): shared by every budget tab; they only hide rows, never re-rank them.
+let viewOpen=false,onlyQuote=false,withinBudget=false,curRound=null,curTiming=null;
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined&&text!==null)n.textContent=text;return n;};
 const fmt=v=>v===null||v===undefined?'—':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:4});
 const signed=v=>`${Number(v)>0?'+':''}${v}`;
@@ -55,6 +58,7 @@ function validHistory(h){
  for(const k of ['g12','jr','spread'])if(!Array.isArray(h[k])||h[k].length!==n||!h[k].every(num))fail();
  if(typeof h.band!=='string'||!/^[012-]+$/.test(h.band)||h.band_start+h.band.length!==n+h.lag)fail();
  if(h.tier_last!=null&&(!Array.isArray(h.tier_last)||h.tier_last.length!==5||!h.tier_last.every(Number.isInteger)))fail();
+ for(const k of ['g12_kb_until','jr_est_until'])if(h[k]!=null&&(!/^\d{6}$/.test(String(h[k]))||mIndex(h[k])<mIndex(h.start)))fail();
  if(!h.outcomes||!h.outcomes['4'])fail();
  for(const o of Object.values(h.outcomes))if(!Array.isArray(o.rows)||o.rows.some(r=>r.length!==6||!Number.isInteger(r[0])||r[0]<0||r[0]>=n||!Number.isFinite(r[2])||!(r[4]>=0&&r[4]<=1)))fail();
 }
@@ -69,7 +73,12 @@ function validate(data){
   if(b.status!=='READY'){if(b.rows.length||!b.reason)throw Error('보류 사유 누락');continue;}
   if(b.model!==MODEL||b.quote_round!==data.round||!/^\d{6}$/.test(b.model_month)||!b.ready_at)throw Error('모델 기준 확인 실패');
   if(b.rows.length>(capital?10:5)||b.rows.some((r,i)=>r.rank!==i+1))throw Error('순위 확인 실패');
-  for(const r of b.rows){
+  // Seoul-excluded view: same model ranks (strictly increasing), no Seoul-prohibited row; optional.
+  if(capital&&b.rows_ex_seoul!=null){
+   const x=b.rows_ex_seoul;
+   if(!Array.isArray(x)||x.length>10||x.some((r,i)=>!Number.isInteger(r.rank)||r.rank<1||(i&&r.rank<=x[i-1].rank)||r.seoul_gap_prohibited)||!Number.isInteger(b.ex_seoul_count)||b.ex_seoul_count<x.length)throw Error('서울 제외 보기 확인 실패');
+  }else if(capital&&b.ex_seoul_reason!=null&&!/^[A-Z][A-Z0-9_]{2,80}$/.test(b.ex_seoul_reason))throw Error('서울 제외 사유 확인 실패');
+  for(const r of [...b.rows,...(capital&&Array.isArray(b.rows_ex_seoul)?b.rows_ex_seoul:[])]){
    if(!r.id||!r.name||!Number.isInteger(r.size)||!HOLD_LABEL[r.quote_hold]||!['QUOTE','MODEL_RENT'].includes(r.rent_source))throw Error('단지 확인 실패');
    for(const k of ['sale_quote','robust_price','applied_rent','quote_gap',capital?'score48':'model_gap'])if(!numeric(r[k]))throw Error('값 확인 실패');
    if(!numeric(r.rent_ratio_pct??null))throw Error('전세가율 확인 실패');
@@ -86,9 +95,26 @@ function nameNode(r,budget,cls){
  const a=el('a',cls?`${cls} inv-link`:'inv-link',r.name);a.href=regionHref(r,budget);
  a.title=`${r.region_name||'지역'} ${r.link_area}㎡ 호가 목록에서 ${r.link_match==='COMPLEX'?'이 단지 보기':'지역 보기'}`;return a;
 }
+// Months between a model-rent basis month and the quote round (2026-10-29 (3)): shown so an old rent is visible at a glance.
+function rentAge(r){
+ if(r.rent_source!=='MODEL_RENT'||!curRound)return '';
+ const m=/^(\d{4})(\d{2})$/.exec(r.rent_basis||'')||/^(\d{4})-(\d{2})-\d{2}$/.exec(r.rent_basis||'');if(!m)return '';
+ const k=(Number(curRound.slice(0,4))-Number(m[1]))*12+Number(curRound.slice(4,6))-Number(m[2]);
+ return k>0?` · ${k}개월 전`:'';
+}
+const rentText=r=>`${r.rent_source==='QUOTE'?'전세호가':'모델 전세'} · ${basis(r.rent_basis)}${rentAge(r)}`;
+// The 4-year value is a relative score of the C model, not money or a probability: two decimals, raw value in the title.
+const scoreText=r=>r.score48==null?'—':Number(r.score48).toFixed(2);
+const scoreTitle=r=>r.score48==null?'':`원값 ${r.score48} · 같은 예산 후보끼리 비교하는 상대점수(억 원·확률 아님)`;
+// Local tabs select by model gap; the current quote gap can be at or above that budget (shown, never hidden by default).
+function overNote(r,budget){
+ if(capital||r.quote_gap==null)return null;const q=Number(r.quote_gap);if(q<budget)return null;
+ const d=Math.round((q-budget)*1000)/1000;
+ return el('small','inv-over',d===0?`예산 ${budget}억과 같음 · 미만 아님`:`현재 갭이 예산 ${budget}억보다 ${fmt(d)}억 큼`);
+}
 function rentCell(r){
  const box=el('span','inv-rent');box.append(el('span','inv-value',fmt(r.applied_rent)));
- box.append(el('small','inv-note',`${r.rent_source==='QUOTE'?'전세호가':'모델 전세'} · ${basis(r.rent_basis)}`));
+ box.append(el('small','inv-note',rentText(r)));
  if(r.rent_ratio_pct!=null)box.append(el('small','inv-ratio',`전세가율 ${r.rent_ratio_pct}%`));
  return box;
 }
@@ -112,8 +138,8 @@ function makeRow(r,budget){
  tr.append(el('td','quote current',fmt(r.sale_quote)),el('td','quote',fmt(r.robust_price)));
  if(capital)tr.append(el('td','quote',r.ask_premium_pct===null?'—':`${signed(r.ask_premium_pct)}%`));
  const rent=el('td','quote divider');rent.append(rentCell(r));tr.append(rent);
- tr.append(el('td','metric divider gap',fmt(r.quote_gap)));
- tr.append(el('td','metric score',capital?(r.score48??'—'):fmt(r.model_gap)));
+ const gap=el('td','metric divider gap');gap.append(el('span','metric-value',fmt(r.quote_gap)));const over=overNote(r,budget);if(over)gap.append(over);tr.append(gap);
+ const score=el('td','metric score',capital?scoreText(r):fmt(r.model_gap));if(capital)score.title=scoreTitle(r);tr.append(score);
  const st=el('td','inv-status-cell');st.append(statusBits(r));tr.append(st);
  return tr;
 }
@@ -121,8 +147,11 @@ function makeCard(r,budget){
  const card=el('article','unit-card inv-card');card.dataset.id=r.id;card.dataset.hold=r.quote_hold;
  const head=el('div','card-heading');head.append(el('span','card-rank',String(r.rank)));const who=el('div'),title=el('h3');title.append(nameNode(r,budget,''));who.append(el('span','region',`${r.address||''} · ${r.size}㎡`),title);head.append(who);card.append(head);
  const grid=el('div','current-grid');
- for(const [label,value,cls,note] of [['매매호가',fmt(r.sale_quote),'sale',null],['적용 전세',fmt(r.applied_rent),'rent',`${r.rent_source==='QUOTE'?'전세호가':'모델 전세'} · ${basis(r.rent_basis)}`],['호가 갭',fmt(r.quote_gap),'gap',null],[capital?'4년 점수':'RP 갭',capital?(r.score48??'—'):fmt(r.model_gap),'score',null]]){
-  const box=el('div'),strong=el('strong',cls,value);box.append(el('label','',label),strong);if(note)box.append(el('small','inv-note',note));grid.append(box);
+ for(const [label,value,cls,note] of [['매매호가',fmt(r.sale_quote),'sale',null],['적용 전세',fmt(r.applied_rent),'rent',rentText(r)],['호가 갭',fmt(r.quote_gap),'gap',null],[capital?'4년 상대점수':'모델 갭',capital?scoreText(r):fmt(r.model_gap),'score',capital?'금액·확률 아님':null]]){
+  const box=el('div'),strong=el('strong',cls,value);box.append(el('label','',label),strong);if(note)box.append(el('small','inv-note',note));
+  if(cls==='gap'){const over=overNote(r,budget);if(over)box.append(over);}
+  if(cls==='score'&&capital)strong.title=scoreTitle(r);
+  grid.append(box);
  }
  card.append(grid);
  const ratio=r.rent_ratio_pct!=null?` · 전세가율 ${r.rent_ratio_pct}%`:'';
@@ -135,13 +164,62 @@ function notes(b){
  if(capital){
   list.push(`시장 판정 ${b.market_gate||'—'} (판정 자료 ${b.gate_month?ym(b.gate_month):'—'}) · 과거 전세 대체 ${b.prior_rent_count.toLocaleString('ko-KR')}개 · 학습 갭 범위 밖 후보 ${b.training_gap_extrapolation_count.toLocaleString('ko-KR')}개`);
   if(b.expansion_budget)list.push(`${b.budget_eok}억은 C 모델 학습 갭(10억 미만) 밖의 확장 추론입니다. 순위는 참고로만 봅니다.`);
-  list.push('서울은 토지거래허가구역(2026-12-31까지·2년 실거주)으로 갭투자 불가를 표시합니다. 경기도 개별 요건을 따로 확인해야 합니다.');
+  list.push('서울은 토지거래허가구역(2026-12-31까지·2년 실거주)으로 갭투자 불가를 표시합니다. 경기도 개별 요건을 따로 확인해야 합니다. "서울 제외"를 누르면 같은 모델 순위에서 서울만 뺀 후보를 봅니다.');
+  list.push('4년 상대점수는 같은 예산 후보끼리 4년 성과를 비교하는 C 모델 점수입니다. 억 원 금액이나 상승 확률이 아닙니다. 예산마다 후보군이 달라 다른 예산의 점수와 직접 비교하지 않습니다.');
  }else{
   list.push(`전국 진입 조건 ${b.market_gate||'—'} · 정본 선정 지역 ${b.chosen_regions.length?b.chosen_regions.join(' → '):'—'}`);
   const c=b.region_state_counts||{};list.push(`지역 상태: 통과 ${c['0']??0} · 제외 ${c['1']??0} · 자료 부족 ${c['-1']??0} · 호가로 후보를 다시 고르지 않습니다.`);
+  list.push(`이 탭의 ${b.budget_eok}억은 모델 갭(RP 기준) 예산입니다. 지금 호가로 계산한 갭은 이보다 클 수 있어, 예산 이상이면 행에 따로 적습니다.`);
  }
  list.push('단지 이름을 누르면 그 지역의 59㎡·84㎡ 호가 목록으로 이동합니다.');
  return list;
+}
+function shownRows(b){
+ let rows=capital&&viewOpen&&Array.isArray(b.rows_ex_seoul)?b.rows_ex_seoul:b.rows;
+ if(!capital&&withinBudget)rows=rows.filter(r=>r.quote_gap!=null&&Number(r.quote_gap)<b.budget_eok);
+ if(onlyQuote)rows=rows.filter(r=>r.rent_source==='QUOTE');
+ return rows;
+}
+function rebuild(focusId){
+ if(!snapshot)return;
+ const panels=document.createDocumentFragment();for(const b of snapshot.budgets)panels.append(panel(b));
+ $('budget-panels').replaceChildren(panels);choose(selected);
+ const n=focusId&&$(focusId);if(n)n.focus();
+}
+function filterBar(b){
+ const bar=el('div','inv-filters');bar.setAttribute('role','group');bar.setAttribute('aria-label','보기 조건');
+ if(capital){
+  const seg=el('div','inv-seg');seg.setAttribute('role','group');seg.setAttribute('aria-label','순위 보기');
+  for(const [key,label] of [['all','전체 순위'],['open','서울 제외']]){
+   const btn=el('button','',label);btn.type='button';btn.id=`view-${b.budget_eok}-${key}`;btn.dataset.view=key;btn.setAttribute('aria-pressed',String((key==='open')===viewOpen));
+   if(key==='open'&&!Array.isArray(b.rows_ex_seoul)){btn.disabled=true;btn.title=`서울 제외 보기를 만들지 못했습니다. 사유 코드: ${b.ex_seoul_reason||'EX_SEOUL_MISSING'}`;}
+   btn.addEventListener('click',()=>{viewOpen=key==='open';rebuild(btn.id);});seg.append(btn);
+  }
+  bar.append(seg);
+ }
+ const check=(id,label,on,set)=>{const lab=el('label','inv-check'),box=el('input');box.type='checkbox';box.id=id;box.checked=on;box.addEventListener('change',()=>{set(box.checked);rebuild(id);});lab.append(box,el('span','',label));return lab;};
+ if(!capital)bar.append(check(`within-${b.budget_eok}`,`현재 호가 갭도 ${b.budget_eok}억 미만만`,withinBudget,v=>{withinBudget=v;}));
+ bar.append(check(`quote-${b.budget_eok}`,'현재 전세호가 있는 후보만',onlyQuote,v=>{onlyQuote=v;}));
+ return bar;
+}
+// Separate kinds of state (2026-10-29 (3)): data verification, market rule, and the condition of the shown candidates.
+function stateLine(b,rows){
+ const market=capital?(curTiming&&curTiming.status==='READY'?curTiming.verdict:b.market_gate):b.market_gate;
+ const ok=capital?market==='진입 가능':market==='통과';
+ const box=el('p','inv-states'),chip=(label,value,cls)=>{const s=el('span',`inv-state${cls?` ${cls}`:''}`);s.append(el('em','',label),el('span','',value));return s;};
+ const parts=[`${rows.length}곳`],hold=rows.filter(r=>r.quote_hold!=='REFERENCE_ONLY').length;
+ if(capital){
+  const seoul=rows.filter(r=>r.seoul_gap_prohibited).length,permit=rows.filter(r=>!r.seoul_gap_prohibited&&r.permit).length;
+  if(seoul)parts.push(`서울 토허 ${seoul}`);if(permit)parts.push(`개별 토허 확인 ${permit}`);
+ }else{const over=rows.filter(r=>r.quote_gap!=null&&Number(r.quote_gap)>=b.budget_eok).length;if(over)parts.push(`현재 갭 예산 이상 ${over}`);}
+ if(hold)parts.push(`전세 확인 필요 ${hold}`);
+ box.append(chip('자료','검증 완료','ok'),chip(capital?'시장 판정':'전국 조건',market||'—',ok?'ok':'bad'),chip('표시 후보',parts.join(' · '),''));
+ return box;
+}
+function countLine(b,rows){
+ const all=capital&&viewOpen&&Array.isArray(b.rows_ex_seoul)?b.rows_ex_seoul:b.rows;
+ const what=capital&&viewOpen&&Array.isArray(b.rows_ex_seoul)?`서울 제외 후보 ${b.ex_seoul_count.toLocaleString('ko-KR')}곳 중 모델 순위가 높은 ${all.length}곳 · 순위 숫자는 전체 순위 그대로`:`모델 ${capital?'TOP10':'TOP5'}`;
+ return el('p','inv-count',`표시 ${rows.length}곳 / ${all.length}곳 · ${what}`);
 }
 function panel(b){
  const p=el('section','inv-panel');p.id=`panel-${b.budget_eok}`;p.setAttribute('role','tabpanel');p.setAttribute('aria-labelledby',`tab-${b.budget_eok}`);p.dataset.status=b.status;
@@ -152,14 +230,17 @@ function panel(b){
  }
  const meta=el('div','data-meta');
  meta.append(el('p','',`${MODEL_LABEL} · 모델 자료 ${ym(b.model_month)} · 계산 ${dayTime(b.ready_at)} KST · 후보 ${b.candidate_count.toLocaleString('ko-KR')}개`));
- meta.append(el('p','',`호가 관측 ${b.observed_from?`${day(b.observed_from)}–${day(b.observed_to)}`:'—'} KST · 단위 억 원`));p.append(meta);
+ meta.append(el('p','',`호가 관측 ${b.observed_from?`${day(b.observed_from)}–${day(b.observed_to)}`:'—'} KST · 금액 단위 억 원`));p.append(meta);
  for(const t of notes(b))p.append(el('p','table-help',t));
  if(!b.rows.length){p.append(el('p','inv-empty','이 예산에 해당하는 후보가 없습니다.'));return p;}
+ const rows=shownRows(b);
+ p.append(filterBar(b),stateLine(b,rows),countLine(b,rows));
+ if(!rows.length){p.append(el('p','inv-empty','조건에 맞는 후보가 0곳입니다. 다른 후보로 대신 채우지 않습니다. 조건을 풀면 전체 목록을 다시 봅니다.'));return p;}
  const wrap=el('div','desktop-table'),table=el('table','inv-table'),head=el('thead'),tr=el('tr');
- const cols=['순위','단지 · 주소 · 평형','매매호가','강건가',...(capital?['차이율']:[]),'적용 전세','호가 갭',capital?'4년 점수':'RP 갭','판정 · 상태'];
- cols.forEach((c,i)=>{const th=el('th',i===0?'rank':(i===1?'identity':(i===cols.length-1?'inv-status-head':'')),c);th.scope='col';tr.append(th);});head.append(tr);table.append(el('caption','sr-only',`갭 ${b.budget_eok}억 미만 투자 검토 순위`),head);
- const body=el('tbody');for(const r of b.rows)body.append(makeRow(r,b.budget_eok));table.append(body);wrap.append(table);p.append(wrap);
- const cards=el('div','mobile-cards');for(const r of b.rows)cards.append(makeCard(r,b.budget_eok));p.append(cards);
+ const cols=[capital&&viewOpen?'모델 순위':'순위','단지 · 주소 · 평형','매매호가','강건가',...(capital?['차이율']:[]),'적용 전세','호가 갭',capital?'4년 상대점수':'모델 갭','판정 · 상태'];
+ cols.forEach((c,i)=>{const th=el('th',i===0?'rank':(i===1?'identity':(i===cols.length-1?'inv-status-head':'')),c);th.scope='col';tr.append(th);});head.append(tr);table.append(el('caption','sr-only',`${capital?'갭':'모델 갭'} ${b.budget_eok}억 미만 투자 검토 순위`),head);
+ const body=el('tbody');for(const r of rows)body.append(makeRow(r,b.budget_eok));table.append(body);wrap.append(table);p.append(wrap);
+ const cards=el('div','mobile-cards');for(const r of rows)cards.append(makeCard(r,b.budget_eok));p.append(cards);
  // Local exclusions are budget independent: the full region list lives in the timing panel above.
  if(capital){
   const details=el('details','inv-details'),ul=el('ul');details.append(el('summary','','제외 집계 보기'));
@@ -204,7 +285,8 @@ function renderTiming(t){
   rules.append(rule('① 실거래 12개월 상승률 · 구별 중앙값',`${signed(t.g12_pct)}%`,`기준 +${t.g12_limit_pct}% 미만`,t.g12_pass?'통과':'금지',t.g12_pass?'pass':'fail',ago('g12','%',true),h&&'g12'),
    rule('② 시장 전세가율 · 구별 중앙값',`${t.jr_pct}%`,`기준 ${t.jr_floor_pct}% 이상`,t.jr_pass?'통과':'보류',t.jr_pass?'pass':'fail',ago('jr','%',false),h&&'jr'),
    rule('③ 급지 간 격차 · 1급지 − 5급지 24개월',`${signed(t.spread_pctp)}%p`,`+${t.spread_floor_pctp}%p 이상이면 4급지까지, 미만이면 3급지까지`,`${t.tier_limit}급지까지 구 통과`,'info',ago('spread','%p',true),h&&'spread'));
-  $('timing-help').textContent=`①이 기준 이상이면 모든 구가 진입 금지이고, ②가 기준 미만이면 보류입니다. ③은 판정이 풀렸을 때 들어갈 수 있는 급지 범위를 정합니다. 작은 그래프의 바탕색은 그 달에 샀을 때의 판정입니다.${t.verdict==='진입 가능'?'':` 지금은 시장 판정이 ${t.verdict}이므로 아래 순위는 판정이 풀리면 볼 후보입니다.`}`;
+  const est=h?[h.g12_kb_until?`① ${ym(h.g12_kb_until)} 자료까지는 실거래 대신 KB 매매지수 상승률`:null,h.jr_est_until?`② ${ym(h.jr_est_until)} 자료까지는 추정 전세가율`:null].filter(Boolean):[];
+  $('timing-help').textContent=`①이 기준 이상이면 모든 구가 진입 금지이고, ②가 기준 미만이면 보류입니다. ③은 판정이 풀렸을 때 들어갈 수 있는 급지 범위를 정합니다. 작은 그래프의 바탕색은 그 달에 샀을 때의 판정입니다.${est.length?` 회색 점선 구간은 대체·추정 자료입니다: ${est.join(', ')}.`:''}${t.verdict==='진입 가능'?'':` 지금은 시장 판정이 ${t.verdict}이므로 아래 순위는 판정이 풀리면 볼 후보입니다.`}`;
   $('timing-districts-label').textContent=`구 판정 ${t.districts.length}곳 보기 · 통과 ${t.district_counts.ok} · 보류 ${t.district_counts.hold}`;
   $('timing-district-body').replaceChildren(districtTable(t));districts.hidden=false;
   if(h){$('timing-charts').hidden=false;setupOutcome(h);}
@@ -274,18 +356,32 @@ function yearAxis(f,h,last){
  for(let yr=Math.ceil(y0/step)*step;yr<=y1;yr+=step){const i=yr*12-base;if(i>=0)svText(f.svg,f.x(i),f.H-f.B+13,'tick',String(yr),'middle');}
 }
 function linePath(f,vals,xOf){let d='',pen=false;vals.forEach((v,i)=>{if(v===null){pen=false;return;}d+=`${pen?'L':'M'}${f.x(xOf(i)).toFixed(1)} ${f.y(v).toFixed(1)}`;pen=true;});return d;}
-function hover(box,f,pick){
+function hover(box,f,pick,x0,x1){
  const tip=el('div','inv-tip');tip.hidden=true;box.append(tip);
+ // Fixed read-out under the chart (2026-10-29 (3)): the same values for keyboard and small screens.
+ const read=el('p','inv-readout');read.setAttribute('aria-live','polite');read.textContent='누르거나 ←·→ 키로 달을 고르면 값이 나옵니다.';box.append(read);
  const guide=sv('line',{y1:f.T,y2:f.H-f.B,class:'guide',visibility:'hidden'},f.svg);
  const hit=sv('rect',{x:f.L,y:f.T,width:f.pw,height:f.ph,class:'hit'},f.svg);
+ let cur=null;
  const hide=()=>{tip.hidden=true;guide.setAttribute('visibility','hidden');};
- const move=e=>{
-  const r=f.svg.getBoundingClientRect(),got=pick(Math.round(f.inv(e.clientX-r.left)));if(!got){hide();return;}
-  const gx=f.x(got.x);guide.setAttribute('x1',gx);guide.setAttribute('x2',gx);guide.setAttribute('visibility','visible');
+ const show=got=>{
+  cur=got.x;const gx=f.x(got.x);guide.setAttribute('x1',gx);guide.setAttribute('x2',gx);guide.setAttribute('visibility','visible');
   tip.replaceChildren(...got.lines.map((l,k)=>el(k?'span':'strong','',l)));tip.hidden=false;
   const tw=tip.offsetWidth;tip.style.left=`${gx+12+tw>f.W?Math.max(0,gx-tw-12):gx+12}px`;tip.style.top=`${f.T}px`;
+  read.textContent=got.lines.join(' · ');
  };
+ const move=e=>{const r=f.svg.getBoundingClientRect(),got=pick(Math.round(f.inv(e.clientX-r.left)));if(!got){hide();return;}show(got);};
  hit.addEventListener('pointermove',move);hit.addEventListener('pointerdown',move);hit.addEventListener('pointerleave',hide);
+ const step=(from,dir)=>{for(let x=from+dir;x>=x0&&x<=x1;x+=dir){const got=pick(x);if(got)return got;}return null;};
+ if(box._key)box.removeEventListener('keydown',box._key);
+ box._key=e=>{
+  if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();
+  const got=e.key==='Home'?step(x0-1,1):(e.key==='End'?step(x1+1,-1):step(cur===null?(e.key==='ArrowLeft'?x1+1:x0-1):cur,e.key==='ArrowRight'?1:-1));
+  if(got)show(got);
+ };
+ box.addEventListener('keydown',box._key);
+ if(box._blur)box.removeEventListener('blur',box._blur);box._blur=hide;box.addEventListener('blur',box._blur);
+ box.tabIndex=0;box.setAttribute('role','group');box.setAttribute('aria-label',`${f.svg.getAttribute('aria-label')} 선택한 뒤 ←·→ 키로 달을 옮깁니다.`);
 }
 const SIGNAL={
  g12:{y0:-27,y1:31,ticks:[-20,0,20],fmt:v=>v===0?'0':`${v>0?'+':''}${v}%`,val:v=>`${v>0?'+':''}${v.toFixed(1)}%`,th:t=>Number(t.g12_limit_pct),thLabel:t=>`기준 +${t.g12_limit_pct}%`,name:'실거래 12개월 상승률',at:[2012,1],below:false},
@@ -297,14 +393,24 @@ function drawSignal(box,t,h,spans,key){
  const s=SIGNAL[key],vals=h[key],fin=vals.filter(v=>v!==null),th=s.th(t),end=h.count-1+h.lag;
  const f=frame(box,{height:104,left:36,right:8,top:8,bottom:18,x0:-1,x1:h.count+h.lag+3,y0:Math.min(s.y0,Math.floor(Math.min(...fin))-2),y1:Math.max(s.y1,Math.ceil(Math.max(...fin))+2),
   label:`${s.name} ${mLabel(h,0)}부터 ${mLabel(h,h.count-1)}까지, 매수월 자리에 그림. 기준 ${th}. 현재 ${s.val(fin[fin.length-1])}.`});
- wash(f,spans);yGrid(f,s.ticks,s.fmt);yearAxis(f,h,end);
+ wash(f,spans);
+ // Substitute / estimated data months (2026-10-29 (3)): ① KB index before real-transaction 12-month change exists, ② estimated rent ratio.
+ const until=key==='g12'?h.g12_kb_until:(key==='jr'?h.jr_est_until:null),u=until?mIndex(until)-mIndex(h.start):-1,estName=key==='g12'?'KB 지수 대체':'추정';
+ if(u>=0){
+  const xa=f.x(h.lag-0.5),xb=f.x(u+h.lag+0.5);sv('rect',{x:xa,y:f.T,width:Math.max(0,xb-xa),height:f.ph,class:'est'},f.svg);
+  if(xb-xa>=textW(estName,9)+6)svText(f.svg,xa+3,f.T+9,'est-label',estName);
+ }
+ yGrid(f,s.ticks,s.fmt);yearAxis(f,h,end);
  sv('line',{x1:f.L,x2:f.W-f.R,y1:f.y(th),y2:f.y(th),class:'thr'},f.svg);
  svText(f.svg,f.x(s.at[0]*12+s.at[1]-1-mIndex(h.start)),f.y(th)+(s.below?11:-4),'thr-label',s.thLabel(t));
- sv('path',{d:linePath(f,vals,i=>i+h.lag),class:'sig'},f.svg);
+ if(u>=0){
+  sv('path',{d:linePath(f,vals.map((v,i)=>i<=u?v:null),i=>i+h.lag),class:'sig sig-est'},f.svg);
+  sv('path',{d:linePath(f,vals.map((v,i)=>i>=u?v:null),i=>i+h.lag),class:'sig'},f.svg);
+ }else sv('path',{d:linePath(f,vals,i=>i+h.lag),class:'sig'},f.svg);
  const lv=vals[h.count-1];if(lv!==null)sv('circle',{cx:f.x(end),cy:f.y(lv),r:3.6,class:'end-dot'},f.svg);
  box.append(f.svg);
  hover(box,f,x=>{const d=x-h.lag;if(d<0||d>=h.count||vals[d]===null)return null;const b=bandAt(h,x);
-  return {x,lines:[`${mShort(h,x)} 매수 · ${b===null?'판정 없음':BAND_NAME[b]}`,`${mShort(h,d)} 자료 ${s.val(vals[d])}`]};});
+  return {x,lines:[`${mShort(h,x)} 매수 · ${b===null?'판정 없음':BAND_NAME[b]}`,`${mShort(h,d)} 자료 ${s.val(vals[d])}${d<=u?` (${estName})`:''}`]};},h.lag,end);
 }
 function drawCycle(box,h,spans){
  box.replaceChildren();
@@ -334,14 +440,14 @@ function drawCycle(box,h,spans){
  }
  box.append(f.svg);
  hover(box,f,x=>{if(x<0||x>end)return null;const b=bandAt(h,x),lines=[`${mLabel(h,x)} · ${b===null?'판정 없음':`그 달에 사면 ${BAND_NAME[b]}`}`];
-  if(x<h.count)lines.push(h.tier_index.map((v,q)=>`${q+1}급지 ${v[x]===null?'—':Math.round(v[x])}`).join(' · '));return {x,lines};});
+  if(x<h.count)lines.push(h.tier_index.map((v,q)=>`${q+1}급지 ${v[x]===null?'—':Math.round(v[x])}`).join(' · '));return {x,lines};},0,end);
 }
 function drawOutcome(box,h,spans){
  box.replaceChildren();
  const o=h.outcomes[horizon],rows=o.rows,vals=rows.map(r=>r[2]),lo=Math.min(...vals),hi=Math.max(...vals),step=hi-lo>24?8:4;
  const y0=Math.min(-step,Math.floor(lo/step)*step),y1=Math.ceil((hi+step)/step)*step,narrow=box.clientWidth<560,end=h.count-1+h.lag;
  const f=frame(box,{height:narrow?220:270,left:narrow?30:36,right:narrow?12:74,top:22,bottom:20,x0:-1,x1:h.count+h.lag+3,y0,y1,
-  label:`그 달에 샀다면 ${horizon}년 뒤 결과, 갭 ${h.budget_eok}억 미만 한 채 평균. 진입한 달 손실 ${Math.round(o.gate.loss*100)}%, 건너뛴 달에 샀다면 ${Math.round((o.skipped.loss||0)*100)}%.`});
+  label:`그 달에 샀다면 ${horizon}년 뒤 결과, 갭 ${h.budget_eok}억 미만, 결과가 나온 채의 평균. 진입한 달 손실 ${Math.round(o.gate.loss*100)}%, 건너뛴 달에 샀다면 ${Math.round((o.skipped.loss||0)*100)}%.`});
  wash(f,spans);
  const ticks=[];for(let v=y0;v<=y1;v+=step)ticks.push(v);yGrid(f,ticks,v=>v===0?'0':`${v>0?'+':''}${v}억`);yearAxis(f,h,end);
  const bw=Math.max(0.8,(f.x(1)-f.x(0))*0.72);
@@ -372,7 +478,7 @@ function drawOutcome(box,h,spans){
  box.append(f.svg);
  const byD=new Map(rows.map(r=>[r[0],r]));
  hover(box,f,x=>{const r=byD.get(x);if(!r)return null;const lossN=Math.round(r[4]*r[3]);
-  return {x,lines:[`${mLabel(h,x)} 매수 · ${r[1]?'진입한 달':'건너뛴 달'}`,`${horizon}년 뒤 한 채 평균 ${r[2]>=0?'+':''}${r[2].toFixed(2)}억`,`${r[3]}채 중 손실 ${lossN}채${r[5]?' · 격차 국면':''}`]};});
+  return {x,lines:[`${mLabel(h,x)} 매수 · ${r[1]?'진입한 달':'건너뛴 달'}`,`${horizon}년 뒤 한 채 평균 ${r[2]>=0?'+':''}${r[2].toFixed(2)}억`,`결과가 나온 ${r[3]}채(최대 5채) 중 손실 ${lossN}채${r[5]?' · 격차 국면':''}`]};},rows[0][0],lastD);
 }
 function setupOutcome(h){
  const seg=$('outcome-toggle');seg.replaceChildren();
@@ -383,10 +489,13 @@ function setupOutcome(h){
  if(!h.outcomes[horizon])horizon='4';
 }
 function outcomeText(h){
- const o=h.outcomes[horizon],g=Math.round(o.gate.loss*100),k=Math.round((o.skipped.loss||0)*100);
- $('outcome-title').textContent=`그 달에 샀다면 ${horizon}년 뒤 — 갭 ${h.budget_eok}억 미만, 한 채 평균`;
- $('outcome-sub').textContent=`진입한 달 손실 ${g}%${horizon==='4'?'(해마다 기준을 다시 고르면 1-13%)':''} · 건너뛴 달에 샀다면 ${k}% · 지금 같은 격차 국면은 따로 적었다`;
- $('outcome-note').dataset.base=`막대 = 그 달 매수 다섯 채의 평균(실제 매수가, 거래비용 차감, 세전). 진입한 달은 체계가 고른 다섯 채, 건너뛴 달은 판정 없이 같은 순위로 샀다면의 값이다. 판정은 매수월 2개월 전 자료로 한다. 2012-17년 큰 막대는 갭 ${h.budget_eok}억으로 강남·서초를 살 수 있던 시기라, 지금 같은 갭으로 기대할 값이 아니다.`;
+ // Sample wording fixed (2026-10-29 (3)): a bar is the mean of the up-to-5 picks whose result exists, not always five.
+ const o=h.outcomes[horizon],rows=o.rows,g=Math.round(o.gate.loss*100),k=Math.round((o.skipped.loss||0)*100);
+ const inRows=rows.filter(r=>r[1]),outRows=rows.filter(r=>!r[1]),few=rows.filter(r=>r[3]<5).length,sum=a=>a.reduce((s,r)=>s+r[3],0);
+ const first=mLabel(h,rows[0][0]),last=rows[rows.length-1][0];
+ $('outcome-title').textContent=`그 달에 샀다면 ${horizon}년 뒤 — 갭 ${h.budget_eok}억 미만, 결과가 나온 채의 평균`;
+ $('outcome-sub').textContent=`진입한 달 손실 ${g}%(${inRows.length}개월·${sum(inRows)}채)${horizon==='4'?' · 해마다 기준을 다시 고르면 1-13%':''} · 건너뛴 달에 샀다면 ${k}%(${outRows.length}개월·${sum(outRows)}채) · 매수 ${first}-${mLabel(h,last)} · 격차 국면은 따로 적었다`;
+ $('outcome-note').dataset.base=`막대 = 그 달에 고른 최대 5채 중 ${horizon}년 결과가 나온 채의 평균(실제 매수가, 거래비용 차감, 세전). ${rows.length}개월 중 ${few}개월은 결과가 나온 채가 1-4채다. 진입한 달은 체계가 고른 채, 건너뛴 달은 판정 없이 같은 순위로 샀다면의 값이다. 같은 단지가 여러 달에 다시 뽑히고 보유 기간이 겹치므로 채 수를 서로 독립된 투자 건수로 보지 않는다. 손실 비율은 과거 기록이며 앞으로의 손실 확률이 아니다. 판정은 매수월 2개월 전 자료로 한다. ${mLabel(h,last+1)} 이후 매수분은 ${horizon}년이 지나지 않아 결과 미확정이다. 2012-17년 큰 막대는 갭 ${h.budget_eok}억으로 강남·서초를 살 수 있던 시기라, 지금 같은 갭으로 기대할 값이 아니다.`;
 }
 function drawCharts(force=false){
  const t=snapshot&&snapshot.timing;if(!capital||!t||t.status!=='READY'||!t.history)return;
@@ -404,9 +513,11 @@ function choose(budget,focus=false){
 }
 function render(data){
  const tabs=document.createDocumentFragment(),panels=document.createDocumentFragment();
+ curRound=data.round;curTiming=data.timing||null;
  for(const b of data.budgets){
   const t=el('button','inv-tab');t.type='button';t.id=`tab-${b.budget_eok}`;t.dataset.budget=b.budget_eok;t.dataset.status=b.status;t.setAttribute('role','tab');t.setAttribute('aria-controls',`panel-${b.budget_eok}`);
-  const label=el('span','inv-tab-label');label.append(el('span','inv-tab-prefix','갭 '),document.createTextNode(`${b.budget_eok}억 미만`));
+  // Local tabs are model-gap budgets; the current quote gap can exceed them (2026-10-29 (3)).
+  const label=el('span','inv-tab-label');label.append(el('span','inv-tab-prefix',capital?'갭 ':'모델 갭 '),document.createTextNode(`${b.budget_eok}억 미만`));
   t.append(label,el('span',`inv-tab-status ${b.status.toLowerCase()}`,STATUS[b.status]));
   if(capital&&b.budget_eok>TRAINING_GAP)t.append(el('span','inv-tab-flag','확장 추론'));
   t.addEventListener('click',()=>choose(b.budget_eok));
@@ -432,21 +543,26 @@ function render(data){
  if(data.stale)problems.push('투자모델 상태 확인이 3시간 넘게 갱신되지 않았습니다. 표시된 결과는 마지막으로 검증된 산출물입니다.');
  if(data.committed_at&&Date.now()-new Date(data.committed_at).getTime()>21*24*60*60*1000)problems.push('호가 확정 회차로부터 3주 이상 지난 결과입니다. 회차·계산 시각을 확인해 주세요.');
  $('error').textContent=problems.join(' ');$('error').hidden=!problems.length;
- $('connection').textContent=problems.length?'확정 자료 · 일부 보류':'확정 자료 · 검증 통과';
+ $('connection').textContent=problems.length?'자료 검증 · 일부 보류':'자료 검증 통과';
  document.body.dataset.error='false';document.body.dataset.ready='true';
 }
-async function load(){
+async function load(force=false){
  if(busy)return;busy=true;$('refresh').disabled=true;
  try{
-  const response=await fetch(`../data/${dataName}.json?v=${Math.floor(Date.now()/300000)}`,{cache:'no-store',signal:AbortSignal.timeout(30000)});
-  if(!response.ok)throw Error('HTTP '+response.status);const data=await response.json();validate(data);render(data);
+  // 2026-10-29 (3): one fixed URL revalidated with the server (ETag) instead of a new URL every 5 minutes,
+  // so an unchanged publication is not downloaded, parsed or redrawn again. The button forces a fresh copy.
+  const response=await fetch(`../data/${dataName}.json${force?`?t=${Date.now()}`:''}`,{cache:'no-cache',signal:AbortSignal.timeout(30000)});
+  if(!response.ok)throw Error('HTTP '+response.status);
+  const tag=response.headers.get('ETag')||response.headers.get('Last-Modified');
+  if(!force&&snapshot&&tag&&tag===lastTag)return;
+  const data=await response.json();validate(data);render(data);lastTag=tag;
  }catch(error){
   $('connection').textContent=snapshot?'갱신 확인 실패 · 기존 확정 자료 유지':'자료 확인 실패';
   $('error').textContent=snapshot?'새 발행 확인에 실패해 기존 자료를 유지합니다. 잠시 후 지금 확인을 눌러주세요.':'투자 검토 자료를 불러오지 못했습니다. 네트워크를 확인하고 지금 확인을 눌러주세요.';
   $('error').hidden=false;document.body.dataset.error='true';
  }finally{busy=false;$('refresh').disabled=false;}
 }
-$('refresh').addEventListener('click',load);
+$('refresh').addEventListener('click',()=>load(true));
 if('ResizeObserver' in window){let timer=0;new ResizeObserver(()=>{clearTimeout(timer);timer=setTimeout(()=>drawCharts(false),120);}).observe($('timing'));}
 else addEventListener('resize',()=>drawCharts(false));
 load();setInterval(()=>{if(!document.hidden)load();},300000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});

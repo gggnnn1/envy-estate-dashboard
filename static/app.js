@@ -6,7 +6,9 @@ const regionCode=new URLSearchParams(location.search).get('region');
 // Arrival from an investment-review page: highlight that complex once (2026-10-29).
 const query=new URLSearchParams(location.search);
 const focusId=/^\d{1,8}$/.test(query.get('focus')||'')?query.get('focus'):null,fromGap=/^gap\d{1,2}$/.test(query.get('from')||'')?query.get('from'):null;
-let focusDone=false;
+// Arrival from the full-collection search (2026-10-29 (3)): same highlight, its own label.
+const findId=!focusId&&/^\d{1,8}$/.test(query.get('find')||'')?query.get('find'):null,markId=focusId||findId,markLabel=focusId?'투자 검토 단지':'검색한 단지';
+let focusDone=false,lastTag=null,visible=[],allRows=null,focusNote=null;
 const lane=document.body.dataset.lane||'capital',local=lane==='local_major',prefix=local?'local-':'';
 for(const a of document.querySelectorAll('[data-lane-tab]'))a.setAttribute('aria-selected',String(a.dataset.laneTab===lane));
 if(local){
@@ -22,13 +24,19 @@ const descriptions={up:'현재 호가가 과거보다 높음',down:'현재 호�
 const dotDate=s=>`${s.slice(0,4)}.${s.slice(4,6)}.${s.slice(6,8)}`;
 const ym=s=>`${s.slice(0,4)}.${s.slice(4,6)}`;
 const obsDate=s=>new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit'}).format(new Date(s)).replace(/\s+/g,'').replace(/\.$/,'');
+// Switching 84/59 keeps the region, the highlighted complex and the way back to the investment tab (2026-10-29 (3)).
+const keep=`${focusId?`&focus=${focusId}`:''}${findId?`&find=${findId}`:''}${fromGap?`&from=${fromGap}`:''}`;
 for(const a of document.querySelectorAll('[data-tab]')){
  if(Number(a.dataset.tab)===area)a.setAttribute('aria-current','page');
- if(regionCode&&/^\d{5}$/.test(regionCode))a.href=`../${prefix}${a.dataset.tab}/?region=${regionCode}`;
+ if(regionCode&&/^\d{5}$/.test(regionCode))a.href=`../${prefix}${a.dataset.tab}/?region=${regionCode}${keep}`;
 }
 $('back-to-regions').hidden=!regionCode;
 if(regionCode&&fromGap){const a=el('a','back-link invest-back','← 투자 검토로 돌아가기');a.id='back-to-invest';a.href=`../${prefix}invest/#${fromGap}`;$('back-to-regions').after(a);}
-const focusMark=(r,node,label)=>{if(focusId&&String(r.id)===focusId){node.classList.add('is-focus');label.append(el('span','focus-badge','투자 검토 단지'));}};
+const focusMark=(r,node,label)=>{if(markId&&String(r.id)===markId){node.classList.add('is-focus');label.append(el('span','focus-badge',markLabel));}};
+// Search scope is stated (2026-10-29 (3)): the first page searches only the regional leaders it shows.
+$('search').placeholder=regionCode?'이 지역의 단지 검색':'이 목록(지역별 최고호가)에서 지역·단지 검색';$('search').setAttribute('aria-label',$('search').placeholder);
+const fullBox=el('div','full-search');fullBox.id='full-search';fullBox.hidden=true;$('no-results').after(fullBox);
+if(regionCode){$('download-all').href=`../data/${prefix}${area}-regions.csv`;$('download-all').textContent='전체 지역 원본';}
 function validate(data){
  if(data.schema_version!==2||data.area!==area||!Array.isArray(data.rows)||!data.rows.length)throw Error('자료 형식·평형 확인 실패');
  if(local){
@@ -138,9 +146,38 @@ function renderRows(){
  });
  const desktop=document.createDocumentFragment(),mobile=document.createDocumentFragment();for(const r of rows){desktop.append(makeRow(r));mobile.append(makeCard(r));}
  $('rows').replaceChildren(desktop);$('mobile-cards').replaceChildren(mobile);$('no-results').hidden=rows.length!==0;
- $('result-count').textContent=`${new Set(rows.map(r=>r.region)).size}지역 · ${rows.length}단지 / 전체 ${snapshot.counts.rows}단지`;
+ $('result-count').textContent=`${new Set(rows.map(r=>r.region)).size}지역 · ${rows.length}단지 / 전체 ${snapshot.counts.rows}단지${sort!=='sale'?' · 순위 숫자는 매매가 순위':''}`;
+ // CSV = exactly the rows and order on screen; the static file stays as the full original (2026-10-29 (3)).
+ visible=rows;$('download-csv').replaceChildren(document.createTextNode(`현재 결과 CSV · ${rows.length}행 `),el('span','','↗'));$('download-csv').lastChild.setAttribute('aria-hidden','true');
+ if(!regionCode){const show=!rows.length&&q.length>0;fullBox.hidden=!show;if(show)fullPrompt($('search').value.trim());}
  document.body.dataset.ready='true';document.body.dataset.visible=String(rows.length);
- if(focusId&&!focusDone){const target=[...document.querySelectorAll('.is-focus')].find(n=>n.offsetParent!==null);if(target){focusDone=true;target.scrollIntoView({block:'center'});}}
+ if(markId&&!focusDone){const target=[...document.querySelectorAll('.is-focus')].find(n=>n.offsetParent!==null);if(target){focusDone=true;target.scrollIntoView({block:'center'});}}
+ if(focusId&&!focusNote&&!snapshot.rows.some(r=>String(r.id)===focusId)){
+  focusNote=el('p','table-help focus-missing',`투자 검토에서 고른 단지가 이 ${area}㎡ 목록에는 없습니다. ${area===84?59:84}㎡ 목록을 확인해 주세요.`);focusNote.id='focus-missing';
+  ($('back-to-invest')||$('back-to-regions')).after(focusNote);
+ }
+}
+// Full-collection search (2026-10-29 (3)): only when the leaders list has no match; loads the region file on demand
+// and shows names with links to the region page (prices are shown there, after that page's full validation).
+function fullPrompt(text){
+ const btn=el('button','full-search-button',`전체 수집 단지에서 "${text}" 찾기`);btn.type='button';btn.addEventListener('click',()=>fullSearch(text));
+ fullBox.replaceChildren(btn);
+}
+async function fullSearch(text){
+ const norm=s=>s.replace(/\s/g,'').toLocaleLowerCase('ko-KR'),q=norm(text);
+ fullBox.replaceChildren(el('p','table-help','전체 수집 단지를 불러오는 중입니다.'));
+ try{
+  if(!allRows){
+   const response=await fetch(`../data/${prefix}${area}-regions.json`,{cache:'no-cache',signal:AbortSignal.timeout(60000)});
+   if(!response.ok)throw Error('HTTP '+response.status);const data=await response.json();
+   if(data.schema_version!==2||data.area!==area||data.view!=='regions'||!Array.isArray(data.rows))throw Error('형식');
+   allRows=data.rows.filter(r=>r&&r.name&&r.region&&/^\d{5}$/.test(r.region_code)&&/^\d{1,8}$/.test(String(r.id))).map(r=>({id:String(r.id),name:r.name,region:r.region,code:r.region_code}));
+  }
+  const hits=allRows.filter(r=>norm(`${r.region}${r.name}`).includes(q));
+  const box=document.createDocumentFragment();box.append(el('p','table-help',hits.length?`전체 수집 단지 ${allRows.length.toLocaleString('ko-KR')}곳 중 ${hits.length}곳이 맞습니다${hits.length>30?' (앞의 30곳만 표시)':''}. 누르면 그 지역 목록에서 단지를 강조합니다.`:`전체 수집 단지 ${allRows.length.toLocaleString('ko-KR')}곳에서도 찾지 못했습니다.`));
+  const list=el('ul','full-search-list');for(const r of hits.slice(0,30)){const li=el('li'),a=el('a','region-link',`${r.region} · ${r.name}`);a.href=`?region=${r.code}&find=${encodeURIComponent(r.id)}`;li.append(a);list.append(li);}
+  if(hits.length)box.append(list);fullBox.replaceChildren(box);
+ }catch(error){fullBox.replaceChildren(el('p','table-help','전체 수집 단지를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'));}
 }
 function apply(data){
  snapshot=data;const first=data.rows[0]||{name:'이 평형 수집 단지 없음',region:data.selected_region,sale:{current:null}};
@@ -178,18 +215,23 @@ function apply(data){
  $('error').hidden=!old;if(old)$('error').textContent='최근 관측으로부터 3주 이상 지난 자료입니다. 회차·관측일을 확인해 주세요.';
  renderRows();
 }
-async function load(){
+async function load(force=false){
  if(busy)return;busy=true;$('refresh').disabled=true;
  try{
   if(regionCode&&!/^\d{5}$/.test(regionCode))throw Error('유효하지 않은 지역 코드');
   const file=regionCode?`${prefix}${area}-regions.json`:`${prefix}${area}.json`;
-  const response=await fetch(`../data/${file}?v=${Math.floor(Date.now()/300000)}`,{cache:'no-store',signal:AbortSignal.timeout(30000)});
-  if(!response.ok)throw Error('HTTP '+response.status);let data=await response.json();validate(data);
+  // 2026-10-29 (3): one fixed URL revalidated with the server (ETag) instead of a new URL every 5 minutes, so an
+  // unchanged publication (the 4-5MB region file included) is not downloaded or re-validated again. The button forces it.
+  const response=await fetch(`../data/${file}${force?`?t=${Date.now()}`:''}`,{cache:'no-cache',signal:AbortSignal.timeout(30000)});
+  if(!response.ok)throw Error('HTTP '+response.status);
+  const tag=response.headers.get('ETag')||response.headers.get('Last-Modified');
+  if(!force&&snapshot&&tag&&tag===lastTag)return;
+  let data=await response.json();validate(data);
   if(regionCode){
    const rows=data.rows.filter(r=>r.region_code===regionCode);const selected=data.scope.region_universe?.find(r=>r.region_code===regionCode);if(!rows.length&&!selected)throw Error('수집 범위에 없는 지역');
    data={...data,selected_region:selected?.region,rows,counts:{rows:rows.length,with_metrics:rows.filter(r=>r.gap_eok!==null).length,without_metrics:rows.filter(r=>r.gap_eok===null).length}};
   }
-  apply(data);
+  apply(data);lastTag=tag;
  }catch(error){
   $('connection').textContent=snapshot?'갱신 확인 실패 · 기존 확정 자료 유지':'자료 확인 실패';
   $('error').textContent=snapshot?'새 발행 확인에 실패해 기존 확정 자료를 유지합니다. 잠시 후 지금 확인을 눌러주세요.':'자료를 불러오지 못했습니다. 지역 코드·네트워크를 확인하거나 지역별 최고호가로 돌아가 주세요.';
@@ -197,12 +239,13 @@ async function load(){
  }finally{busy=false;$('refresh').disabled=false;}
 }
 $('download-csv').addEventListener('click',event=>{
- if(!regionCode||!snapshot)return;event.preventDefault();
+ if(!snapshot)return;event.preventDefault();
+ const filtered=visible.length!==snapshot.rows.length||$('sort').value!=='sale';
  const header=['지역','단지','평형','순위','매매현재','매매2주','매매4주','적용전세','전세2주','전세4주','갭','전세가율','전세출처','실거래기준월','실거래관측월','실거래건수','지표기준','적용매매','매매출처','매매적용기준월','매매실거래기준월','매매실거래관측월','매매실거래건수','전세적용기준월','전세현재호가','매매관측월','매매근거건수','매매건수종류','전세관측월','전세근거건수','전세건수종류'];
- const lines=[header,...snapshot.rows.map(r=>[r.region,r.name,area,r.order,r.sale.current,r.sale.two_weeks,r.sale.four_weeks,r.applied_rent,r.rent.two_weeks,r.rent.four_weeks,r.gap_eok,r.rent_ratio_percent,r.rent_source,r.rent_reference?.latest_month,r.rent_reference?.months.join(' / '),r.rent_reference?.count,r.metrics_basis,r.applied_sale,r.sale_source,r.sale_asof_month,r.sale_reference?.latest_month,r.sale_reference?.months.join(' / '),r.sale_reference?.count,r.rent_asof_month,r.rent.current,...['sale','rent'].flatMap(t=>[r[t+'_provenance'].observation_months.join(','),r[t+'_provenance'].count,r[t+'_provenance'].count_kind])])];
+ const lines=[header,...visible.map(r=>[r.region,r.name,area,r.order,r.sale.current,r.sale.two_weeks,r.sale.four_weeks,r.applied_rent,r.rent.two_weeks,r.rent.four_weeks,r.gap_eok,r.rent_ratio_percent,r.rent_source,r.rent_reference?.latest_month,r.rent_reference?.months.join(' / '),r.rent_reference?.count,r.metrics_basis,r.applied_sale,r.sale_source,r.sale_asof_month,r.sale_reference?.latest_month,r.sale_reference?.months.join(' / '),r.sale_reference?.count,r.rent_asof_month,r.rent.current,...['sale','rent'].flatMap(t=>[r[t+'_provenance'].observation_months.join(','),r[t+'_provenance'].count,r[t+'_provenance'].count_kind])])];
  const csv=lines.map(row=>row.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
- const url=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'})),a=el('a');a.href=url;a.download=`${(snapshot.rows[0]?.region||snapshot.selected_region)}_${area}_${snapshot.round}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ const url=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'})),a=el('a');a.href=url;a.download=`${regionCode?(snapshot.rows[0]?.region||snapshot.selected_region):`${local?'지방':'수도권'}_지역별최고호가`}_${area}_${snapshot.round}${filtered?'_현재결과':''}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
-$('search').addEventListener('input',renderRows);$('region').addEventListener('change',renderRows);$('sort').addEventListener('change',renderRows);$('refresh').addEventListener('click',load);
+$('search').addEventListener('input',renderRows);$('region').addEventListener('change',renderRows);$('sort').addEventListener('change',renderRows);$('refresh').addEventListener('click',()=>load(true));
 load();setInterval(()=>{if(!document.hidden)load();},300000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
 })();

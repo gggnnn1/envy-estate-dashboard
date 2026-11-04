@@ -81,3 +81,5 @@ a.inv-region.inv-link{border-bottom:1px solid #79dfcd33;text-decoration:none}a.i
 .inv-svg .loan-line{fill:none;stroke:#e8c27a;stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round}
 .inv-figure figcaption span+span{margin-top:2px}
 .table-help a{color:var(--accent);font-weight:700;text-decoration:underline;text-underline-offset:3px}.table-help a:hover{text-decoration-thickness:2px}
+
+.inv-summary.three{grid-template-columns:repeat(3,1fr)}@media(max-width:560px){.inv-summary.three{grid-template-columns:repeat(3,1fr)}.inv-summary.three strong{font-size:15px}}

@@ -471,7 +471,7 @@ function render(data){
  choose(ORDER.includes(selected)?selected:(ORDER.includes(fromHash)?fromHash:ORDER[0]));
  const ready=data.budgets.filter(b=>b.status==='READY');
  $('round-value').textContent=data.round?dotDate(data.round):'없음';
- const gates=data.timing&&data.timing.status==='READY'?[data.timing.verdict]:[...new Set(ready.map(b=>b.market_gate).filter(Boolean))];$('gate-value').textContent=gates.length?gates.join(' / '):'—';
+ if(capital){const g=$('gate-value').parentElement;if(g){const box=g.parentElement;g.remove();box.classList.add('three');}}else{const gates=data.timing&&data.timing.status==='READY'?[data.timing.verdict]:[...new Set(ready.map(b=>b.market_gate).filter(Boolean))];$('gate-value').textContent=gates.length?gates.join(' / '):'—';}
  $('ready-value').replaceChildren(document.createTextNode(String(ready.length)),el('small','',`/ ${data.budgets.length}`));
  const months=[...new Set(ready.map(b=>b.model_month))];$('month-value').textContent=months.length?months.map(ym).join(' / '):'—';
  $('round-label').textContent=data.round?`호가 확정 회차 ${dotDate(data.round)}${data.committed_at?` · 확정 ${dayTime(data.committed_at)} KST`:''} · ${capital?'서울·경기 69지역':'지방 79지역'}`:'확정 호가 회차 없음';

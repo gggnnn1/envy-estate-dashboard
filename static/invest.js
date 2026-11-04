@@ -14,7 +14,6 @@ const EXCLUSION_LABEL={outside_requested_quote_gap:'요청 갭 범위 밖',no_sa
 const VERDICT_CLASS={'진입 금지(과열)':'stop','보류(전세가율 부족)':'wait','진입 가능':'go','통과':'go','진입 금지':'stop'};
 // Timing charts (2026-10-29): drawn from the receipt-bound timing history; band = verdict of each purchase month.
 const NS='http://www.w3.org/2000/svg',BAND_NAME={0:'진입 가능',1:'보류',2:'진입 금지'},BAND_CLASS={0:'go',1:'wait',2:'stop'};
-const RAMP=['#cde2fb','#9ec5f4','#6da7ec','#3987e5','#256abf'];  // 1급지(brightest) to 5급지; ordinal ramp validated on the dark surface
 const PROVINCE_ORDER=['서울','부산','대구','인천','광주','대전','울산','세종','경기','강원','충북','충남','전북','전남','경북','경남','제주'];
 let horizon='4',drawnWidth=0,regimeText='';
 for(const a of document.querySelectorAll('[data-lane-tab]'))a.setAttribute('aria-selected',String(a.dataset.laneTab===lane));
@@ -275,22 +274,19 @@ function renderTiming(t){
  if(t.status!=='READY'){
   verdict.textContent='보류';verdict.className='inv-verdict wait';
   $('timing-sub').textContent=`시점 판정 자료를 검증하지 못해 표시하지 않습니다. 사유 코드: ${t.reason}`;
-  $('timing-rules').replaceChildren();$('timing-help').textContent='';districts.hidden=true;return;
+  $('timing-rules').replaceChildren();$('timing-rules').style.display='none';$('timing-help').textContent='';districts.hidden=true;return;
  }
  verdict.textContent=t.verdict;verdict.className=`inv-verdict ${VERDICT_CLASS[t.verdict]}`;
  const mixed=t.consistent?'모든 예산에 같은 판정':'예산별 판정 자료가 달라 가장 최근 자료를 표시';
  if(capital){
-  const h=t.history,ago=(k,unit,sign)=>{if(!h)return null;const v=h[k],n=v.length,f=x=>x===null?'—':`${sign&&x>0?'+':''}${x.toFixed(1)}${unit}`;return `한 달 전 ${f(v[n-2])} · 6개월 전 ${f(v[n-7])}`;};
-  $('timing-sub').textContent=`판정 자료 ${ym(t.month)} 실거래 · 수도권 투자 시점·지역 선정 체계 v2 · ${mixed}`;
-  rules.append(rule('① 실거래 12개월 상승률 · 구별 중앙값',`${signed(t.g12_pct)}%`,`기준 +${t.g12_limit_pct}% 미만`,t.g12_pass?'통과':'금지',t.g12_pass?'pass':'fail',ago('g12','%',true),h&&'g12'),
-   rule('② 시장 전세가율 · 구별 중앙값',`${t.jr_pct}%`,`기준 ${t.jr_floor_pct}% 이상`,t.jr_pass?'통과':'보류',t.jr_pass?'pass':'fail',ago('jr','%',false),h&&'jr'),
-   rule('③ 급지 간 격차 · 1급지 − 5급지 24개월',`${signed(t.spread_pctp)}%p`,`+${t.spread_floor_pctp}%p 이상이면 4급지까지, 미만이면 3급지까지`,`${t.tier_limit}급지까지 구 통과`,'info',ago('spread','%p',true),h&&'spread'));
-  const est=h?[h.g12_kb_until?`① ${ym(h.g12_kb_until)} 자료까지는 실거래 대신 KB 매매지수 상승률`:null,h.jr_est_until?`② ${ym(h.jr_est_until)} 자료까지는 추정 전세가율`:null].filter(Boolean):[];
-  $('timing-help').textContent=`①이 기준 이상이면 모든 구가 진입 금지이고, ②가 기준 미만이면 보류입니다. ③은 판정이 풀렸을 때 들어갈 수 있는 급지 범위를 정합니다. 작은 그래프의 바탕색은 그 달에 샀을 때의 판정입니다.${est.length?` 회색 점선 구간은 대체·추정 자료입니다: ${est.join(', ')}.`:''}${t.verdict==='진입 가능'?'':` 지금은 시장 판정이 ${t.verdict}이므로 아래 순위는 판정이 풀리면 볼 후보입니다.`}`;
+  const h=t.history;
+  $('timing-sub').textContent=`판정 자료 ${ym(t.month)} 실거래 · 수도권 투자 시점·지역 선정 체계 v2 · ${mixed} · ${t.tier_limit}급지까지 구 통과`;
+  const link=document.createElement('a');link.href='../timing/';link.textContent='타이밍 페이지';
+  $('timing-help').replaceChildren(document.createTextNode('실거래 상승률·전세가율·급지 간 격차와 급지별 가격 지수 그래프는 '),link,document.createTextNode(`에서 봅니다.${t.verdict==='진입 가능'?'':` 지금은 시장 판정이 ${t.verdict}이므로 아래 순위는 판정이 풀리면 볼 후보입니다.`}`));
   $('timing-districts-label').textContent=`구 판정 ${t.districts.length}곳 보기 · 통과 ${t.district_counts.ok} · 보류 ${t.district_counts.hold}`;
   $('timing-district-body').replaceChildren(districtTable(t));districts.hidden=false;
   if(h){$('timing-charts').hidden=false;setupOutcome(h);}
-  else{$('timing-charts-hold').textContent=`그래프 자료를 검증하지 못해 그래프만 숨겼습니다. 판정 값은 위와 같습니다. 사유 코드: ${t.history_reason||'CHART_MISSING'}`;$('timing-charts-hold').hidden=false;}
+  else{$('timing-charts-hold').textContent=`그래프 자료를 검증하지 못해 그래프만 숨겼습니다. 판정은 위와 같습니다. 사유 코드: ${t.history_reason||'CHART_MISSING'}`;$('timing-charts-hold').hidden=false;}
  }else{
   const c=t.region_state_counts||{},pop=t.population_min?`${t.population_min/10000}만`:'기준';
   $('timing-sub').textContent=`판정 자료 ${ym(t.month)} · 지방 갭투자 기준 v7.1 · ${mixed}`;
@@ -300,6 +296,7 @@ function renderTiming(t){
   districts.hidden=true;regionList(t);
  }
  $('timing-rules').dataset.count=String(rules.childNodes.length);$('timing-rules').replaceChildren(rules);
+ $('timing-rules').style.display=rules.childNodes.length?'':'none';
 }
 function regionList(t){
  const box=$('timing-regions');box.replaceChildren();box.hidden=false;
@@ -383,65 +380,6 @@ function hover(box,f,pick,x0,x1){
  if(box._blur)box.removeEventListener('blur',box._blur);box._blur=hide;box.addEventListener('blur',box._blur);
  box.tabIndex=0;box.setAttribute('role','group');box.setAttribute('aria-label',`${f.svg.getAttribute('aria-label')} 선택한 뒤 ←·→ 키로 달을 옮깁니다.`);
 }
-const SIGNAL={
- g12:{y0:-27,y1:31,ticks:[-20,0,20],fmt:v=>v===0?'0':`${v>0?'+':''}${v}%`,val:v=>`${v>0?'+':''}${v.toFixed(1)}%`,th:t=>Number(t.g12_limit_pct),thLabel:t=>`기준 +${t.g12_limit_pct}%`,name:'실거래 12개월 상승률',at:[2012,1],below:false},
- jr:{y0:38,y1:88,ticks:[40,60,80],fmt:v=>`${v}%`,val:v=>`${v.toFixed(1)}%`,th:t=>Number(t.jr_floor_pct),thLabel:t=>`기준 ${t.jr_floor_pct}%`,name:'시장 전세가율',at:[2015,6],below:true},
- spread:{y0:-24,y1:38,ticks:[-20,0,20],fmt:v=>v===0?'0':`${v>0?'+':''}${v}%p`,val:v=>`${v>0?'+':''}${v.toFixed(1)}%p`,th:t=>Number(t.spread_floor_pctp),thLabel:t=>`기준 +${t.spread_floor_pctp}%p`,name:'급지 간 격차',at:[2010,1],below:false},
-};
-function drawSignal(box,t,h,spans,key){
- box.replaceChildren();
- const s=SIGNAL[key],vals=h[key],fin=vals.filter(v=>v!==null),th=s.th(t),end=h.count-1+h.lag;
- const f=frame(box,{height:104,left:36,right:8,top:8,bottom:18,x0:-1,x1:h.count+h.lag+3,y0:Math.min(s.y0,Math.floor(Math.min(...fin))-2),y1:Math.max(s.y1,Math.ceil(Math.max(...fin))+2),
-  label:`${s.name} ${mLabel(h,0)}부터 ${mLabel(h,h.count-1)}까지, 매수월 자리에 그림. 기준 ${th}. 현재 ${s.val(fin[fin.length-1])}.`});
- wash(f,spans);
- // Substitute / estimated data months (2026-10-29 (3)): ① KB index before real-transaction 12-month change exists, ② estimated rent ratio.
- const until=key==='g12'?h.g12_kb_until:(key==='jr'?h.jr_est_until:null),u=until?mIndex(until)-mIndex(h.start):-1,estName=key==='g12'?'KB 지수 대체':'추정';
- if(u>=0){
-  const xa=f.x(h.lag-0.5),xb=f.x(u+h.lag+0.5);sv('rect',{x:xa,y:f.T,width:Math.max(0,xb-xa),height:f.ph,class:'est'},f.svg);
-  if(xb-xa>=textW(estName,9)+6)svText(f.svg,xa+3,f.T+9,'est-label',estName);
- }
- yGrid(f,s.ticks,s.fmt);yearAxis(f,h,end);
- sv('line',{x1:f.L,x2:f.W-f.R,y1:f.y(th),y2:f.y(th),class:'thr'},f.svg);
- svText(f.svg,f.x(s.at[0]*12+s.at[1]-1-mIndex(h.start)),f.y(th)+(s.below?11:-4),'thr-label',s.thLabel(t));
- if(u>=0){
-  sv('path',{d:linePath(f,vals.map((v,i)=>i<=u?v:null),i=>i+h.lag),class:'sig sig-est'},f.svg);
-  sv('path',{d:linePath(f,vals.map((v,i)=>i>=u?v:null),i=>i+h.lag),class:'sig'},f.svg);
- }else sv('path',{d:linePath(f,vals,i=>i+h.lag),class:'sig'},f.svg);
- const lv=vals[h.count-1];if(lv!==null)sv('circle',{cx:f.x(end),cy:f.y(lv),r:3.6,class:'end-dot'},f.svg);
- box.append(f.svg);
- hover(box,f,x=>{const d=x-h.lag;if(d<0||d>=h.count||vals[d]===null)return null;const b=bandAt(h,x);
-  return {x,lines:[`${mShort(h,x)} 매수 · ${b===null?'판정 없음':BAND_NAME[b]}`,`${mShort(h,d)} 자료 ${s.val(vals[d])}${d<=u?` (${estName})`:''}`]};},h.lag,end);
-}
-function drawCycle(box,h,spans){
- box.replaceChildren();
- const last=h.tier_index.map(v=>v[h.count-1]),lab=h.tier_last||last.map(v=>Math.round(v)),YT=Math.max(300,Math.ceil((Math.max(...last)+45)/50)*50),narrow=box.clientWidth<560,end=h.count-1+h.lag;
- const f=frame(box,{height:narrow?236:300,left:narrow?30:36,right:narrow?12:74,top:30,bottom:20,x0:-1,x1:h.count+h.lag+3,y0:60,y1:YT,
-  label:`급지별 KB 매매지수 ${mLabel(h,0)}부터 ${mLabel(h,h.count-1)}까지(2006년 1월 = 100). 현재 ${lab.map((v,q)=>`${q+1}급지 ${v}`).join(', ')}. 바탕색은 그 달에 샀을 때의 시장 판정.`});
- wash(f,spans);
- const ticks=[];for(let v=100;v<YT;v+=50)ticks.push(v);yGrid(f,ticks,v=>String(v));yearAxis(f,h,end);
- const place=placer();
- for(const s of spans){
-  const xa=f.x(s.a-0.5),xb=f.x(s.b+0.5),w=xb-xa,cx=(xa+xb)/2,name=BAND_NAME[s.s];
-  if(w<22||s.b>=end||cx-textW(name,10.5)/2<f.L||!place(cx,textW(name,10.5)))continue;
-  svText(f.svg,cx,f.T+13,'band-name',name,'middle');
-  if(w>=120)svText(f.svg,cx,f.T+26,'band-period',`${mShort(h,s.a)}–${mShort(h,s.b)}`,'middle');
- }
- const now=spans[spans.length-1];
- sv('line',{x1:f.x(end),x2:f.x(end),y1:f.T-6,y2:f.H-f.B,class:'now'},f.svg);
- svText(f.svg,f.W-f.R,f.T-12,'now-label',`지금(${mShort(h,end)} 매수) ${BAND_NAME[now.s]}`,'end');
- for(let q=4;q>=0;q--)sv('path',{d:linePath(f,h.tier_index[q],i=>i),class:'tier',stroke:RAMP[q]},f.svg);
- const order=last.map((v,q)=>({v,q})).sort((a,b)=>a.v-b.v),ypos={};let prev=Infinity;
- for(const e of order){let yy=f.y(e.v);if(yy>prev-13)yy=prev-13;ypos[e.q]=yy;prev=yy;}
- for(let q=0;q<5;q++){
-  sv('circle',{cx:f.x(h.count-1),cy:f.y(last[q]),r:3.6,fill:RAMP[q],class:'end-dot tier-dot'},f.svg);
-  // Narrow screens: the current index moves into the legend instead of the right margin.
-  if(!narrow)svText(f.svg,f.W-f.R+8,ypos[q]+3.5,'end-label',`${q+1}급지 ${lab[q]}`);
-  const lg=document.querySelector(`#timing-charts [data-tier="${q+1}"]`);if(lg)lg.textContent=narrow?`${q+1}급지 ${lab[q]}`:`${q+1}급지`;
- }
- box.append(f.svg);
- hover(box,f,x=>{if(x<0||x>end)return null;const b=bandAt(h,x),lines=[`${mLabel(h,x)} · ${b===null?'판정 없음':`그 달에 사면 ${BAND_NAME[b]}`}`];
-  if(x<h.count)lines.push(h.tier_index.map((v,q)=>`${q+1}급지 ${v[x]===null?'—':Math.round(v[x])}`).join(' · '));return {x,lines};},0,end);
-}
 function drawOutcome(box,h,spans){
  box.replaceChildren();
  const o=h.outcomes[horizon],rows=o.rows,vals=rows.map(r=>r[2]),lo=Math.min(...vals),hi=Math.max(...vals),step=hi-lo>24?8:4;
@@ -499,11 +437,10 @@ function outcomeText(h){
 }
 function drawCharts(force=false){
  const t=snapshot&&snapshot.timing;if(!capital||!t||t.status!=='READY'||!t.history)return;
- const box=$('chart-cycle'),w=box.clientWidth;if(!w||(!force&&w===drawnWidth))return;drawnWidth=w;
+ const box=$('chart-outcome'),w=box.clientWidth;if(!w||(!force&&w===drawnWidth))return;drawnWidth=w;
  const h=t.history,spans=bandSpans(h);
- drawCycle(box,h,spans);outcomeText(h);drawOutcome($('chart-outcome'),h,spans);
+ outcomeText(h);drawOutcome(box,h,spans);
  const note=$('outcome-note');note.textContent=(regimeText&&box.clientWidth<560?`${regimeText}. `:'')+note.dataset.base;
- for(const c of document.querySelectorAll('#timing-rules [data-chart]'))drawSignal(c,t,h,spans,c.dataset.chart);
 }
 function choose(budget,focus=false){
  selected=budget;

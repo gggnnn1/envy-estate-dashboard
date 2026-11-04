@@ -80,3 +80,4 @@ a.inv-region.inv-link{border-bottom:1px solid #79dfcd33;text-decoration:none}a.i
 .inv-svg .seoul-line{fill:none;stroke:#f4f8fa;stroke-width:1.6;stroke-dasharray:5 3;stroke-linejoin:round;stroke-linecap:round}
 .inv-svg .loan-line{fill:none;stroke:#e8c27a;stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round}
 .inv-figure figcaption span+span{margin-top:2px}
+.table-help a{color:var(--accent);font-weight:700;text-decoration:underline;text-underline-offset:3px}.table-help a:hover{text-decoration-thickness:2px}
